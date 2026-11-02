@@ -1,0 +1,25 @@
+{
+  "name": "@jarvis/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=../.env src/index.ts",
+    "start": "node --env-file-if-exists=../.env src/index.ts",
+    "test": "JARVIS_RUNNER=mock vitest run",
+    "typecheck": "tsc --noEmit -p .",
+    "smoke:claude": "node --env-file-if-exists=../.env scripts/smoke.ts claude",
+    "smoke:codex": "node --env-file-if-exists=../.env scripts/smoke.ts codex"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.316",
+    "@hono/node-server": "^2.1.5",
+    "@openai/codex-sdk": "^0.166.0",
+    "croner": "^11.0.0",
+    "hono": "^4.13.16"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
