@@ -50,6 +50,8 @@ export interface Env {
   port: number;
   accessToken: string | null;
   vault: string;
+  /** Set when the vault is a working copy of fixtures/vault (mock mode never writes the fixtures). */
+  vaultSource: string | null;
   runner: 'mock' | 'real';
   dataDir: string;
   codexHome: string;
@@ -77,7 +79,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   }
   const home = homedir();
   const dataDir = resolve(REPO_ROOT, source.JARVIS_DATA_DIR || 'data');
-  const vault = resolve(REPO_ROOT, source.JARVIS_VAULT || 'fixtures/vault');
+  let vault = resolve(REPO_ROOT, source.JARVIS_VAULT || 'fixtures/vault');
+  let vaultSource: string | null = null;
+  if (vault === resolve(REPO_ROOT, 'fixtures/vault') && source.JARVIS_VAULT_WRITE_FIXTURES !== '1') {
+    vaultSource = vault;
+    vault = join(dataDir, 'demo-vault');
+  }
   const codexHome = resolve(source.JARVIS_CODEX_HOME || source.CODEX_HOME || (runner === 'mock' ? join(REPO_ROOT, 'fixtures/usage/codex') : join(home, '.codex')));
   const claudeHome = resolve(source.JARVIS_CLAUDE_HOME || (runner === 'mock' ? join(REPO_ROOT, 'fixtures/usage/claude') : join(home, '.claude')));
   return {
@@ -85,6 +92,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     port: Number(source.JARVIS_PORT || 4317),
     accessToken,
     vault,
+    vaultSource,
     runner,
     dataDir,
     codexHome,

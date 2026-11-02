@@ -250,6 +250,29 @@ export function seedIfEmpty(s: Services, now = Date.now()): boolean {
     run(s.db, `INSERT INTO usage_snapshots (ts, agent, window, used_percent, resets_at, source) VALUES (?, 'codex', 'five_hour', 27.5, ?, 'codex-session-log')`, iso(now - 60_000), iso(now + 3.7 * H));
     run(s.db, `INSERT INTO usage_snapshots (ts, agent, window, used_percent, resets_at, source) VALUES (?, 'codex', 'weekly', 26, ?, 'codex-session-log')`, iso(now - 60_000), iso(now + 4.1 * D));
   });
+  seedMemory(s, now);
   s.bus.publish('seeded', {});
   return true;
+}
+
+/** Demo memory + skill proposals so the review flows have something real to show. */
+function seedMemory(s: Services, now: number): void {
+  const mem = s.modules.memory as { proposals: { propose: (i: { target: string; content: string; reason: string; mode?: 'append' | 'replace'; runId?: string | null }) => unknown } } | undefined;
+  if (!mem) return;
+  const runId = get<{ id: string }>(s.db, "SELECT id FROM runs WHERE status = 'done' ORDER BY started_at DESC LIMIT 1")?.id ?? null;
+  try {
+    mem.proposals.propose({ target: 'People/Priya Patel.md', content: '- Approved deposit amounts on 2 Nov: £20 check-up, £50 hygiene.', reason: 'Priya confirmed by email; closes the sign-off thread.', runId });
+    mem.proposals.propose({ target: 'Projects/ClientEasy.md', content: '- 2026-11-02: token refresh race fixed on jarvis/t_3fq-token-refresh (PR pending approval).', reason: 'Keep current state accurate for the next coding run.', runId });
+    mem.proposals.propose({ target: 'CORE.md', content: '- Prefers invoice PDFs attached, not links.', reason: 'Mentioned while triaging email.', runId });
+  } catch {
+    // vault missing or read-only: skip demo proposals
+  }
+  run(
+    s.db,
+    `INSERT INTO skill_proposals (id, run_id, name, description, body, status, created_at, existing) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0)`,
+    newId('sp'), runId, 'staging-health-check',
+    'Check a client staging site end to end before audits: container, TLS, 5xx rate, then Lighthouse.',
+    '# Staging health check\n\n1. `docker ps` on the VPS — is the site container up and healthy?\n2. `curl -sI https://staging.<site>` — expect 200 and a valid certificate.\n3. Check the last 100 access-log lines for 5xx.\n4. Only then run Lighthouse (`npx lighthouse <url> --quiet --output json`).\n5. Report findings; never restart containers without approval.\n',
+    new Date(now - 13 * H).toISOString(),
+  );
 }

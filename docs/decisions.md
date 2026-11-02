@@ -16,3 +16,15 @@ Ambiguities in SPEC.md resolved with the simplest option that keeps the constrai
 10. **No MCP SDK dependency** — the Jarvis MCP server (Phase 2a) is a small JSON-RPC stdio implementation.
 11. **Dev URLs**: `npm run dev` serves the API on :4317 and the UI with hot reload on :5173 (proxying `/api`). `npm start` builds the UI and serves everything on :4317.
 12. **Mock mode seeds demo data** on an empty database (disable with `JARVIS_SEED=0`) and reads usage fixtures from `fixtures/usage/`.
+
+## Phase 2a — Memory & Skills
+
+13. **Mock mode works on a copy of the vault.** When `JARVIS_VAULT` points at `fixtures/vault`, Jarvis copies it to `data/demo-vault` and writes there, so the fixtures (and tests) are never modified.
+14. **Auto-apply rules for `save_memory`:** appends to `Journal/`, `Inbox.md` and `Research/` apply immediately; any change to `CORE.md`, `Projects/`, `People/` or `Areas/`, and any full rewrite outside `Research/`, waits for approval. Skills cannot be edited through `save_memory` (only through skill proposals).
+15. **Backups** are taken for owner-approved changes (`data/backups/<date>/<path>`, first version of the day kept). Rewrite proposals fail safely if the note changed after the proposal was made.
+16. **FTS5** uses `porter unicode61` with prefix matching and bm25 (title weighted 8×). A plain `notes_body` table backs the `LIKE` fallback.
+17. **Context trimming order:** skill list → project note → CORE.md; Jarvis instructions are never trimmed. Over-budget parts are cut at a line boundary with a note telling the agent to use `read_note`.
+18. **Learning loop** runs as a recorded "side run" (visible in the task's runs, counts toward usage) resuming the same session, read-only, with approvals refused. One learning step at a time; it does not take a concurrency slot. Only runs that finished `done` with ≥ `learning.minToolCalls` tool calls qualify.
+19. **Skills sync** copies `Skills/<name>/` into `~/.claude/skills/<name>` and `~/.codex/skills/<name>` with a `.jarvis-manifest.json` per target; same-named skills Jarvis didn't create are skipped, never overwritten. Mock mode targets `data/skills-dry-run/*`. Sync runs on demand (Skills page) and after approving a skill proposal.
+20. **Jarvis MCP server** is a dependency-free stdio JSON-RPC bridge (`server/src/mcp/stdio.ts`) that forwards to `POST /api/mcp/call` with a per-run token (revoked when the run ends). `request_approval` waits up to 10 minutes, then returns `PENDING`; approving later resumes the session. A run that ends with a pending approval leaves the task in "Needs you".
+21. **Codex MCP registration** uses the SDK's `config` option (`--config mcp_servers.jarvis.*`), so the owner's `~/.codex/config.toml` is never edited and no `CODEX_HOME` overlay is needed.

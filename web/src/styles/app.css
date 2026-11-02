@@ -1843,3 +1843,9 @@ button.row {
     gap: 0;
   }
 }
+@media (max-width: 767px) {
+  .page-head .actions {
+    margin-left: 0;
+    width: 100%;
+  }
+}

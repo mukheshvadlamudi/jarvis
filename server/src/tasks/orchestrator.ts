@@ -274,7 +274,40 @@ export class Orchestrator {
     return runId;
   }
 
-  private makeSink(taskId: string, runId: string, agent: AgentId): RunEventSink {
+  /**
+   * A small follow-on run in an existing session that does not change the task's status (used by
+   * the learning loop). Recorded as a run so its plan usage is visible. Approvals are refused.
+   */
+  async sideRun(taskId: string, opts: { agent: AgentId; prompt: string; resumeSessionId: string | null; cwd: string; label: string }): Promise<RunResult> {
+    const task = this.d.tasks.get(taskId);
+    if (!task) throw new Error('not_found');
+    const runId = newId('r');
+    run(
+      this.d.db,
+      `INSERT INTO runs (id, task_id, agent, cwd, started_at, status, route_reason, prompt) VALUES (?, ?, ?, ?, ?, 'running', ?, ?)`,
+      runId, taskId, opts.agent, opts.cwd, nowIso(), opts.label, opts.prompt,
+    );
+    const base = this.makeSink(taskId, runId, opts.agent, true);
+    const handle = this.d.runners.get(opts.agent).start(
+      {
+        taskId, runId, prompt: opts.prompt, contextPrefix: '', cwd: opts.cwd, resumeSessionId: opts.resumeSessionId ?? undefined,
+        sandbox: 'read-only', allowNetwork: false, taskType: task.type, vaultPath: this.d.vaultPath,
+      },
+      base,
+    );
+    const result: RunResult = await handle.done.catch((err): RunResult => ({ status: 'failed' as const, summary: String(err), error: String(err), usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0 }, toolCalls: 0 }));
+    if (this.d.db.isOpen) {
+      run(
+        this.d.db,
+        `UPDATE runs SET status = ?, ended_at = ?, input_tokens = ?, output_tokens = ?, cached_tokens = ?, cost_estimate_usd = ?, error = ?, session_id = COALESCE(?, session_id) WHERE id = ?`,
+        result.status, nowIso(), result.usage.inputTokens, result.usage.outputTokens, result.usage.cachedTokens, result.usage.costUsd, result.error ?? null, result.sessionId ?? null, runId,
+      );
+      this.d.bus.publish('run.finished', this.getRun(runId));
+    }
+    return result;
+  }
+
+  private makeSink(taskId: string, runId: string, agent: AgentId, side = false): RunEventSink {
     const insert = this.d.db.prepare('INSERT INTO run_events (run_id, ts, kind, payload_json) VALUES (?, ?, ?, ?)');
     let pendingApprovals = 0;
     return {
@@ -290,6 +323,7 @@ export class Orchestrator {
         run(this.d.db, 'UPDATE runs SET session_id = ? WHERE id = ?', id, runId);
       },
       requestApproval: async (req) => {
+        if (side) return { approved: false, status: 'rejected', note: 'Not allowed during a learning step' };
         const { approval, decision } = this.d.approvals.request({ runId, taskId, ...req, detail: { ...req.detail, agent, runId } });
         pendingApprovals++;
         const t = this.d.tasks.get(taskId);
@@ -320,7 +354,10 @@ export class Orchestrator {
       const summary = result.summary.length > 2000 ? `${result.summary.slice(0, 1997)}…` : result.summary;
       const status = result.status === 'done' ? 'done' : result.status === 'cancelled' ? 'cancelled' : 'failed';
       const expired = all<Approval>(this.d.db, "SELECT * FROM approvals WHERE run_id = ? AND status = 'expired' AND decided_via = 'expiry'", runId);
-      if (expired.length && status !== 'cancelled') {
+      const pending = all<Approval>(this.d.db, "SELECT * FROM approvals WHERE run_id = ? AND status = 'pending'", runId);
+      if (pending.length && status === 'done') {
+        this.d.tasks.setStatus(taskId, 'needs_you', { result_summary: `Waiting for your approval: ${pending[0].summary}. ${summary}` });
+      } else if (expired.length && status !== 'cancelled') {
         this.d.tasks.setStatus(taskId, 'needs_you', { result_summary: `An approval expired without a decision. ${summary}` });
       } else {
         this.d.tasks.setStatus(taskId, status, { result_summary: summary });
