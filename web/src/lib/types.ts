@@ -23,6 +23,7 @@ export interface Task {
   outward: number;
   route_reason: string | null;
   not_before: string | null;
+  mode?: 'chat' | 'task';
 }
 
 export interface Run {
@@ -43,6 +44,11 @@ export interface Run {
   route_reason: string | null;
   prompt: string | null;
   context_report?: ContextReport | null;
+  context_report_json?: string | null;
+  model?: string | null;
+  effort?: string | null;
+  attachments_json?: string | null;
+  answer?: string | null;
 }
 
 export interface ContextReport {

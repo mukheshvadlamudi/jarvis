@@ -195,7 +195,7 @@ export function App() {
   const counts = summary.data?.counts ?? {};
   const badgeFor = (r: RouteDef) => (r.badge === 'approvals' ? summary.data?.approvals ?? 0 : r.badge === 'needs_you' ? counts.needs_you ?? 0 : 0);
   const navRoutes = routes.filter((r) => r.nav).sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
-  const isActive = (r: RouteDef) => (r.path === '/' ? path === '/' : path === r.path || path.startsWith(`${r.path}/`));
+  const isActive = (r: RouteDef) => (r.path === '/' ? path === '/' || path.startsWith('/c/') : path === r.path || path.startsWith(`${r.path}/`));
   const Page = current ? pageFor(current.route) : null;
   const running = summary.data?.active.length ?? 0;
 

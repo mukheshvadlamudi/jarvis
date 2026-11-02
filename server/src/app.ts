@@ -50,7 +50,7 @@ export function createServices(opts: CreateAppOptions): Services {
   const config = new ConfigStore(env.dataDir);
   const tasks = new TaskService(db, bus);
   const approvals = new ApprovalService(db, bus);
-  const usage = new UsageMeter({ db, bus, codexHome: env.codexHome, claudeHome: env.claudeHome, caps: () => config.get().usage.claudeSoftCaps });
+  const usage = new UsageMeter({ db, bus, codexHome: env.codexHome });
   const runners = createRunnerRegistry(env.runner, { mockDelayMs: env.mockDelayMs }, opts.runnerOverrides);
   const orchestrator = new Orchestrator({
     db, bus, tasks, approvals, usage, runners, config,

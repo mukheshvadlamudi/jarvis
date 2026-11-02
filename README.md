@@ -37,7 +37,9 @@ Try everything without touching your plans: `JARVIS_RUNNER=mock` gives scripted 
 ## What's inside
 | Page | What it does |
 |---|---|
-| Home | Command bar (dictation, live type/project/agent preview), Needs you, Running now, plan usage, today's routines, follow-ups |
+| Ask | Conversations with live thinking and steps; per-message agent, model and effort picker; attachments; Ask both, Second opinion and Remember; searchable history |
+| Connectors | Manage each agent's MCP connectors through its own CLI, from the owner UI |
+| Overview | Command bar (dictation, live type/project/agent preview), Needs you, Running now, plan usage, today's routines, follow-ups |
 | Board | Inbox → Queued → Running → Needs you → Done; drag or `[`/`]`; run with Claude or Codex |
 | Run view | Live transcript, tool calls, file changes, consults between agents, context inspector, tokens; Outputs panel (preview, download, save to vault); hand off to the other agent for review or to continue; Stop / follow-up / run again |
 | Approvals | Everything outward-facing waits here (and in Telegram) |
@@ -48,7 +50,7 @@ Try everything without touching your plans: `JARVIS_RUNNER=mock` gives scripted 
 | Memory | Vault search and reader, memory proposals with diffs, size caps, migration proposal |
 | Skills | Vault skills, sync to Claude/Codex, agent-proposed skills |
 | Schedules | Cron schedules and built-in routines with missed-run catch-up |
-| Usage | Plan windows, per-day/per-type tokens, routing decisions |
+| Usage | Real plan usage from Claude Code and Codex session logs, per-day/per-type tokens, routing decisions |
 | Settings | Routing rules, agent model and reasoning effort, collaboration, concurrency, budgets, voice, Telegram, theme |
 | Voice | Hands-free: say “Jarvis, …”. Kokoro speaks approvals and results, Whisper listens. All on your device, no credits |
 

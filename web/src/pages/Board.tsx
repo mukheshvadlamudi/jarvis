@@ -87,7 +87,8 @@ export default function Board() {
   const type = query.get('type') ?? '';
   const agent = query.get('agent') ?? '';
   const selectedId = query.get('task');
-  const params = new URLSearchParams({ limit: '400' });
+  // Conversations live on Ask; the Board is for background tasks.
+  const params = new URLSearchParams({ limit: '400', mode: 'task' });
   if (project) params.set('project', project);
   if (type) params.set('type', type);
   if (agent) params.set('agent', agent);

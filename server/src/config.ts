@@ -13,6 +13,8 @@ export interface RouterConfig {
   defaults: Record<TaskType, AgentId>;
   effortOverride: { high?: AgentId; medium?: AgentId; low?: AgentId };
   scheduledTasks: AgentId;
+  /** Plain questions on Ask: the agent with more plan room left ('headroom'), or always one agent. */
+  chat: 'headroom' | AgentId;
   fallbackAtPercent: number;
 }
 
@@ -21,7 +23,7 @@ export interface JarvisConfig {
   maxConcurrentRuns: number;
   memory: { contextBudgetTokens: number; coreCapTokens: number; projectCapTokens: number };
   learning: { enabled: boolean; minToolCalls: number };
-  usage: { pollSeconds: number; claudeSoftCaps: { fiveHourTokens: number; weeklyTokens: number } };
+  usage: { pollSeconds: number };
   approvals: { expiryHours: number };
   classifier: { useAgent: boolean };
   feeds: { fetchEveryHours: number };
@@ -40,12 +42,13 @@ export const DEFAULT_CONFIG: JarvisConfig = {
     defaults: { code: 'claude', write: 'claude', research: 'codex', admin: 'codex', update: 'codex', memory: 'codex', other: 'codex' },
     effortOverride: { high: 'claude' },
     scheduledTasks: 'codex',
+    chat: 'headroom',
     fallbackAtPercent: 85,
   },
   maxConcurrentRuns: 2,
   memory: { contextBudgetTokens: 6000, coreCapTokens: 2000, projectCapTokens: 3000 },
   learning: { enabled: true, minToolCalls: 8 },
-  usage: { pollSeconds: 120, claudeSoftCaps: { fiveHourTokens: 3_000_000, weeklyTokens: 40_000_000 } },
+  usage: { pollSeconds: 120 },
   approvals: { expiryHours: 24 },
   classifier: { useAgent: false },
   feeds: { fetchEveryHours: 6 },
@@ -153,13 +156,13 @@ export function validateConfig(c: JarvisConfig): string[] {
   for (const [effort, agent] of Object.entries(c.router.effortOverride)) {
     if (agent !== undefined && !AGENTS.includes(agent)) errors.push(`router.effortOverride.${effort} must be claude or codex`);
   }
+  if (!['headroom', ...AGENTS].includes(c.router.chat)) errors.push('router.chat must be headroom, claude or codex');
   if (!AGENTS.includes(c.router.scheduledTasks)) errors.push('router.scheduledTasks must be claude or codex');
   if (!(c.router.fallbackAtPercent > 0 && c.router.fallbackAtPercent <= 100)) errors.push('router.fallbackAtPercent must be between 1 and 100');
   if (!Number.isInteger(c.maxConcurrentRuns) || c.maxConcurrentRuns < 1 || c.maxConcurrentRuns > 4) errors.push('maxConcurrentRuns must be an integer from 1 to 4 (8 GB RAM budget)');
   if (c.memory.contextBudgetTokens < 1000 || c.memory.contextBudgetTokens > 50000) errors.push('memory.contextBudgetTokens must be between 1,000 and 50,000');
   if (c.learning.minToolCalls < 1) errors.push('learning.minToolCalls must be at least 1');
   if (c.usage.pollSeconds < 30) errors.push('usage.pollSeconds must be at least 30');
-  if (c.usage.claudeSoftCaps.fiveHourTokens <= 0 || c.usage.claudeSoftCaps.weeklyTokens <= 0) errors.push('usage.claudeSoftCaps must be positive');
   if (c.approvals.expiryHours <= 0) errors.push('approvals.expiryHours must be positive');
   if (c.feeds.fetchEveryHours < 1) errors.push('feeds.fetchEveryHours must be at least 1');
   for (const level of ['low', 'medium', 'high'] as const) {

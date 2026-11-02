@@ -37,7 +37,25 @@ function latestReset(u: AgentUsage, threshold: number): string | null {
  * type default, then a usage check that falls back to the other agent when the chosen one is
  * at/over `fallbackAtPercent`. If both are exhausted, hold until the earliest reset.
  */
-export function decide(task: Pick<Task, 'agent_pref' | 'schedule_id' | 'effort' | 'type' | 'outward'>, usage: UsageState, cfg: RouterConfig): RouteDecision {
+/** Highest known window of an agent; null when Claude/Codex has not reported yet. */
+function load(u: AgentUsage | undefined): number | null {
+  const vals = [u?.five_hour?.usedPercent, u?.weekly?.usedPercent].filter((v): v is number => typeof v === 'number');
+  return vals.length ? Math.max(...vals) : null;
+}
+
+/** The agent with more plan room. Unknown usage counts as half full; a tie goes to Claude. */
+export function headroomPick(usage: UsageState): { agent: AgentId; reason: string } {
+  const c = load(usage.claude);
+  const x = load(usage.codex);
+  const agent: AgentId = (x ?? 50) < (c ?? 50) ? 'codex' : 'claude';
+  const pct = (v: number | null) => (v === null ? 'unknown' : `${Math.round(v)}%`);
+  return { agent, reason: `question → ${agent} (more room: Claude ${pct(c)}, Codex ${pct(x)})` };
+}
+
+/** A message that asks rather than instructs ("Is the fix safe?", "how do I…"). */
+export const QUESTION = /\?\s*$|^\s*(what|how|why|when|where|who|which|should|can|could|would|is|are|was|were|do|does|did|will|explain|tell me)\b/i;
+
+export function decide(task: Pick<Task, 'agent_pref' | 'schedule_id' | 'effort' | 'type' | 'outward'> & { mode?: Task['mode']; title?: string }, usage: UsageState, cfg: RouterConfig): RouteDecision {
   let agent: AgentId;
   let reason: string;
   let explicit = false;
@@ -48,6 +66,15 @@ export function decide(task: Pick<Task, 'agent_pref' | 'schedule_id' | 'effort' 
   } else if (task.schedule_id) {
     agent = cfg.scheduledTasks;
     reason = `scheduled tasks → ${agent}`;
+  } else if (task.mode === 'chat' && ((task.type === 'other' && !task.outward) || (task.title !== undefined && QUESTION.test(task.title) && task.effort !== 'high'))) {
+    // A plain question: answer from whichever plan has more room (or the agent the owner set).
+    // Asking about "merge" or "send" is not an outward action; per-tool approvals still apply.
+    if (cfg.chat === 'claude' || cfg.chat === 'codex') {
+      agent = cfg.chat;
+      reason = `questions → ${agent}`;
+    } else {
+      ({ agent, reason } = headroomPick(usage));
+    }
   } else if (task.outward) {
     agent = 'claude';
     reason = 'outward action → claude (per-tool approvals)';

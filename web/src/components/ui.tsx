@@ -250,14 +250,13 @@ export function UsageBar({ agent, label, w, threshold }: { agent: AgentId; label
   return (
     <div className="meter">
       <span className="label">{label}</span>
-      <div className={`bar ${level}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={`${agent} ${label} usage`}>
+      <div className={`bar ${level}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={w ? Math.round(pct) : undefined} aria-valuetext={w ? undefined : 'Not reported yet'} aria-label={`${agent} ${label} usage`}>
         <span style={{ width: `${pct}%` }} />
         <i className="mark" style={{ left: `${threshold}%` }} title={`Router falls back at ${threshold}%`} />
       </div>
       <span className="pct">{w ? `${Math.round(pct)}%` : '—'}</span>
       <span className="reset">
-        {w ? resetsIn(w.resetsAt) : 'no reading yet'}
-        {w?.estimate ? ' · estimate' : ''}
+        {w ? resetsIn(w.resetsAt) : 'Not reported yet'}
       </span>
     </div>
   );

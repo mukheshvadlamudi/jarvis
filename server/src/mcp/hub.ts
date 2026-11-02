@@ -78,6 +78,20 @@ export class McpHub {
         if (!hits.length) return { text: `No notes match "${str('query')}".` };
         return { text: hits.map((h) => `${h.path} — ${h.title} (${h.tokens} tokens)\n  ${h.snippet.replace(/[\u0001\u0002]/g, '')}`).join('\n') };
       }
+      case 'search_conversations': {
+        const q = `%${str('query').trim()}%`;
+        if (q === '%%') return { text: 'Give a query.', isError: true };
+        const rows = all<{ task_id: string; title: string; agent: string; started_at: string; prompt: string | null; answer: string | null }>(
+          this.s.db,
+          `SELECT r.task_id, t.title, r.agent, r.started_at, r.prompt, r.answer FROM runs r JOIN tasks t ON t.id = r.task_id
+           WHERE t.mode = 'chat' AND r.task_id <> ? AND (t.title LIKE ? OR r.prompt LIKE ? OR r.answer LIKE ?)
+           ORDER BY r.started_at DESC LIMIT ?`,
+          ctx.taskId, q, q, q, Math.min(Number(args.limit ?? 6), 20),
+        );
+        if (!rows.length) return { text: `No past conversation mentions "${str('query')}".` };
+        const cut = (v: string | null, n: number) => (v ?? '').split('New message from the owner:\n').pop()!.replace(/\s+/g, ' ').trim().slice(0, n);
+        return { text: rows.map((r) => `${r.started_at.slice(0, 10)} · ${r.title} (${r.agent})\n  Owner: ${cut(r.prompt, 200)}\n  Answer: ${cut(r.answer, 400)}`).join('\n\n') };
+      }
       case 'read_note': {
         if (!this.vault) return { text: 'Memory is not available.', isError: true };
         const note = this.vault.read(str('path'));

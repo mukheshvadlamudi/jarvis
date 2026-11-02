@@ -12,7 +12,6 @@ import type { FileCursor } from './logs.ts';
 const log = logger('usage');
 
 type Win = 'five_hour' | 'weekly';
-const HOUR = 3600_000;
 
 export interface CodexRateLimits {
   ts: string;
@@ -54,45 +53,18 @@ export function parseCodexLine(line: unknown): CodexRateLimits | null {
   return windows.length ? { ts, windows } : null;
 }
 
-export interface ClaudeTokenEntry {
-  ts: number;
-  tokens: number;
-  key: string;
-}
-
-/**
- * Weighted token count of one Claude Code transcript line. Cache reads are cheap for the plan, so
- * they count at 10%. Returns null for lines without assistant usage.
- */
-export function parseClaudeLine(line: unknown): ClaudeTokenEntry | null {
-  if (!line || typeof line !== 'object') return null;
-  const l = line as Record<string, any>;
-  if (l.type !== 'assistant' || !l.message?.usage || typeof l.timestamp !== 'string') return null;
-  const u = l.message.usage;
-  const n = (x: unknown) => (typeof x === 'number' ? x : 0);
-  const tokens = n(u.input_tokens) + n(u.output_tokens) + n(u.cache_creation_input_tokens) + Math.round(n(u.cache_read_input_tokens) * 0.1);
-  const key = `${l.message.id ?? ''}:${l.requestId ?? l.uuid ?? l.timestamp}`;
-  return { ts: Date.parse(l.timestamp), tokens, key };
-}
-
 export class UsageMeter {
   private db: Db;
   private bus: EventBus;
   private codexHome: string;
-  private claudeHome: string;
-  private caps: () => { fiveHourTokens: number; weeklyTokens: number };
   private codexCursors = new Map<string, FileCursor>();
-  private claudeCursors = new Map<string, FileCursor>();
-  private claudeEntries = new Map<string, ClaudeTokenEntry>();
   private lastCodexTs: string | null = null;
   private timer: NodeJS.Timeout | null = null;
 
-  constructor(opts: { db: Db; bus: EventBus; codexHome: string; claudeHome: string; caps: () => { fiveHourTokens: number; weeklyTokens: number } }) {
+  constructor(opts: { db: Db; bus: EventBus; codexHome: string }) {
     this.db = opts.db;
     this.bus = opts.bus;
     this.codexHome = opts.codexHome;
-    this.claudeHome = opts.claudeHome;
-    this.caps = opts.caps;
   }
 
   start(intervalSec: number): void {
@@ -114,11 +86,12 @@ export class UsageMeter {
     this.timer = null;
   }
 
-  /** Read only files changed since the last poll and record fresh snapshots. */
+  /**
+   * Read Codex session logs changed since the last poll. Claude has no usable local log: its real
+   * windows come from Claude Code itself (rate-limit events during runs and the agents probe).
+   */
   poll(now = Date.now()): void {
-    const changed = this.pollCodex() || false;
-    const est = this.pollClaude(now);
-    if (changed || est) this.bus.publish('usage.updated', this.current(now));
+    if (this.pollCodex()) this.bus.publish('usage.updated', this.current(now));
   }
 
   private pollCodex(): boolean {
@@ -139,59 +112,6 @@ export class UsageMeter {
     this.lastCodexTs = newest.ts;
     for (const w of newest.windows) this.insert('codex', w.window, w.usedPercent, null, w.resetsAt, 'codex-session-log', newest.ts);
     return true;
-  }
-
-  private pollClaude(now: number): boolean {
-    const dir = join(this.claudeHome, 'projects');
-    if (!existsSync(dir)) return false;
-    const weekAgo = now - 7 * 24 * HOUR;
-    let changed = false;
-    for (const f of listJsonl(dir, weekAgo)) {
-      const prev = this.claudeCursors.get(f.path);
-      if (prev && prev.mtimeMs === f.mtimeMs && prev.size === f.size) continue;
-      const { lines, cursor } = readNewJsonLines(f.path, prev);
-      this.claudeCursors.set(f.path, cursor);
-      for (const line of lines) {
-        const e = parseClaudeLine(line);
-        if (e && e.ts >= weekAgo && !this.claudeEntries.has(e.key)) {
-          this.claudeEntries.set(e.key, e);
-          changed = true;
-        }
-      }
-    }
-    for (const [k, e] of this.claudeEntries) if (e.ts < weekAgo) this.claudeEntries.delete(k);
-    if (!changed && this.claudeEntries.size === 0) return false;
-    const est = this.claudeEstimate(now);
-    const caps = this.caps();
-    const ts = new Date(now).toISOString();
-    this.insert('claude', 'five_hour', Math.min(100, (est.fiveHour / caps.fiveHourTokens) * 100), est.fiveHour, est.fiveHourResetsAt, 'estimate', ts, true);
-    this.insert('claude', 'weekly', Math.min(100, (est.weekly / caps.weeklyTokens) * 100), est.weekly, est.weeklyResetsAt, 'estimate', ts, true);
-    return changed;
-  }
-
-  /** Rolling 5 h / 7 d token totals from Claude Code transcripts. */
-  claudeEstimate(now = Date.now()): { fiveHour: number; weekly: number; fiveHourResetsAt: string | null; weeklyResetsAt: string | null } {
-    let fiveHour = 0;
-    let weekly = 0;
-    let oldest5: number | null = null;
-    let oldest7: number | null = null;
-    for (const e of this.claudeEntries.values()) {
-      if (e.ts > now) continue;
-      if (e.ts >= now - 5 * HOUR) {
-        fiveHour += e.tokens;
-        oldest5 = oldest5 === null ? e.ts : Math.min(oldest5, e.ts);
-      }
-      if (e.ts >= now - 7 * 24 * HOUR) {
-        weekly += e.tokens;
-        oldest7 = oldest7 === null ? e.ts : Math.min(oldest7, e.ts);
-      }
-    }
-    return {
-      fiveHour,
-      weekly,
-      fiveHourResetsAt: oldest5 === null ? null : new Date(oldest5 + 5 * HOUR).toISOString(),
-      weeklyResetsAt: oldest7 === null ? null : new Date(oldest7 + 7 * 24 * HOUR).toISOString(),
-    };
   }
 
   /** Authoritative reading from a live agent (Claude SDK `rate_limit_event`). */
@@ -218,8 +138,8 @@ export class UsageMeter {
   }
 
   /**
-   * Current plan state per agent/window. An authoritative reading (SDK or Codex log) wins while its
-   * window has not reset; otherwise the newest estimate. A window whose reset time has passed reads 0%.
+   * Current plan state per agent/window from real readings only (Claude Code or Codex logs). A window
+   * whose reset time has passed reads 0%; an agent with no reading yet reads null (unknown).
    */
   current(now = Date.now()): UsageState {
     const out: UsageState = { claude: { five_hour: null, weekly: null }, codex: { five_hour: null, weekly: null } };
@@ -231,8 +151,9 @@ export class UsageMeter {
            ORDER BY ts DESC LIMIT 8`,
           agent, window,
         );
-        const authoritative = rows.find((r) => r.source !== 'estimate' && (!r.resets_at || Date.parse(r.resets_at) > now));
-        const pick = authoritative ?? rows.find((r) => r.source === 'estimate') ?? rows[0];
+        // Old token-count estimates (before Nov 2026) are ignored: they were not the plan's real limits.
+        const real = rows.filter((r) => r.source !== 'estimate');
+        const pick = real.find((r) => !r.resets_at || Date.parse(r.resets_at) > now) ?? real[0];
         if (!pick) continue;
         const reset = pick.resets_at ? Date.parse(pick.resets_at) <= now : false;
         const w: UsageWindow = {

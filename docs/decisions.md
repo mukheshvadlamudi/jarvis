@@ -72,3 +72,12 @@ Ambiguities in SPEC.md resolved with the simplest option that keeps the constrai
     - Superseded speech is cancelled in the worker (barge-in).
     - The OS voice covers the first-ever model download.
 47. **No-click operation:** voice turns itself back on at load when it was on before. The desktop app allows autoplay and grants the mic to its own origin, so nothing needs a click. A normal browser needs one click or key per page load (browser rule). Only one tab or window owns the mic (localStorage leader). Commands need the wake word "Jarvis", except within 8 s after Jarvis speaks (20 s after an approval prompt).
+
+## Ask and real plan usage
+
+48. **Conversations are tasks in `chat` mode**, and each message is a run with its own answer, model, effort and events.
+49. **Chats answer immediately** and bypass the background concurrency limit.
+50. **Question-shaped chat messages route by plan headroom**, unless the owner chooses an agent. Keyword types apply only to instructions.
+51. **Claude usage comes from Claude Code's own /usage data** through a prompt-free SDK session, checked every five minutes and during runs. Transcript estimates and soft caps were removed.
+52. **Attachments are copied into the run folder.** Images, and PDFs on Claude, go inline; other files remain available in the folder.
+53. **Connectors use each agent's own CLI** (`claude mcp` / `codex mcp`), managed from the owner UI only.

@@ -1,7 +1,7 @@
 import type { Db, Param } from '../db/index.ts';
 import { all, get, run, updateSql } from '../db/index.ts';
 import type { EventBus } from '../events.ts';
-import type { AgentPref, Effort, Project, Task, TaskStatus, TaskType } from '../types.ts';
+import type { AgentPref, Effort, Project, Task, TaskMode, TaskStatus, TaskType } from '../types.ts';
 import { TASK_STATUSES, TASK_TYPES } from '../types.ts';
 import { newId, nowIso } from '../util/ids.ts';
 import { classify } from './classifier.ts';
@@ -26,6 +26,8 @@ export interface CreateTaskInput {
   then?: unknown;
   /** Set on tasks created by a handoff. */
   handoff?: unknown;
+  /** 'chat' for a conversation on Ask; default 'task'. */
+  mode?: TaskMode;
 }
 
 export interface TaskFilter {
@@ -34,6 +36,7 @@ export interface TaskFilter {
   project?: string;
   agent?: string;
   q?: string;
+  mode?: string;
   limit?: number;
 }
 
@@ -84,6 +87,7 @@ export class TaskService {
       not_before: null,
       then_json: input.then ? JSON.stringify(input.then) : null,
       handoff_json: input.handoff ? JSON.stringify(input.handoff) : null,
+      mode: input.mode === 'chat' ? 'chat' : 'task',
     };
     run(
       this.db,
@@ -93,6 +97,7 @@ export class TaskService {
       t.id, t.title, t.body, t.type, t.status, t.priority, t.project_id, t.agent_pref, t.agent, t.effort, t.parent_id, t.schedule_id,
       t.created_at, t.updated_at, t.due_at, t.result_summary, t.output_path, t.outward, t.route_reason, t.not_before,
     );
+    if (t.mode === 'chat') run(this.db, 'UPDATE tasks SET mode = ? WHERE id = ?', t.mode, t.id);
     if (t.then_json || t.handoff_json) run(this.db, 'UPDATE tasks SET then_json = ?, handoff_json = ? WHERE id = ?', t.then_json, t.handoff_json, t.id);
     this.bus.publish('task.created', t);
     return t;
@@ -124,9 +129,14 @@ export class TaskService {
       where.push('(agent = ? OR (agent IS NULL AND agent_pref = ?))');
       params.push(f.agent, f.agent);
     }
+    if (f.mode === 'chat' || f.mode === 'task') {
+      where.push('mode = ?');
+      params.push(f.mode);
+    }
     if (f.q) {
-      where.push('(title LIKE ? OR body LIKE ?)');
-      params.push(`%${f.q}%`, `%${f.q}%`);
+      // Conversations are searchable by what was asked and answered, not only the title.
+      where.push('(title LIKE ? OR body LIKE ? OR id IN (SELECT task_id FROM runs WHERE prompt LIKE ? OR answer LIKE ?))');
+      params.push(`%${f.q}%`, `%${f.q}%`, `%${f.q}%`, `%${f.q}%`);
     }
     const sql = `SELECT * FROM tasks ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'needs_you' THEN 1 WHEN 'queued' THEN 2 WHEN 'inbox' THEN 3 ELSE 4 END,
