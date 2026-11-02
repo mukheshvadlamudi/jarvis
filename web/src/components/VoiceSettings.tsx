@@ -77,7 +77,7 @@ export function VoiceSettings() {
         </button>
       </Line>
       <Line label="Speed">
-        <input type="range" aria-label="Speaking speed" min={0.8} max={1.3} step={0.05} value={p.speed} onChange={(e) => voice.setPrefs({ speed: Number(e.target.value) })} style={{ width: 160, accentColor: 'var(--accent)' }} />
+        <input type="range" aria-label="Speaking speed" min={0.8} max={1.3} step={0.05} value={p.speed} onChange={(e) => voice.setPrefs({ speed: Number(e.target.value) })} style={{ width: 160, accentColor: 'var(--primary)' }} />
         <span className="mono num faint" style={{ fontSize: 12, width: 40 }}>
           {p.speed.toFixed(2)}×
         </span>
@@ -106,7 +106,7 @@ export function VoiceSettings() {
       <Line label="Speak out loud">
         {SPEAK.map((s) => (
           <label key={s.key} className="chip" style={{ cursor: 'pointer', gap: 6 }}>
-            <input type="checkbox" checked={p.speak[s.key]} onChange={(e) => voice.setPrefs({ speak: { ...p.speak, [s.key]: e.target.checked } })} style={{ accentColor: 'var(--accent)' }} />
+            <input type="checkbox" checked={p.speak[s.key]} onChange={(e) => voice.setPrefs({ speak: { ...p.speak, [s.key]: e.target.checked } })} style={{ accentColor: 'var(--primary)' }} />
             {s.label}
           </label>
         ))}
