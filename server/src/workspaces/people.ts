@@ -17,7 +17,7 @@ export interface Person {
 
 /** "Open threads" list items from a People note body. */
 export function openThreads(body: string): string[] {
-  const lines = body.split('\n');
+  const lines = body.split(/\r?\n/);
   const start = lines.findIndex((l) => /open threads/i.test(l));
   if (start < 0) return [];
   const base = /^(\s*)/.exec(lines[start])![1].length;

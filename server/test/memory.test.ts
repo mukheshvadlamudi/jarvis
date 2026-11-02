@@ -152,3 +152,12 @@ describe('maintenance', () => {
     expect(existsSync(join(ctx.s.env.vault, 'clienteasy roadmap.md'))).toBe(true);
   });
 });
+
+describe('Windows line endings', () => {
+  it('parses CRLF notes the same as LF notes', () => {
+    const lf = '---\ntype: person\nfollow_up: 2026-11-04\n---\n# Priya\n\n- Open threads:\n  - Invoice\n';
+    const crlf = lf.replace(/\n/g, '\r\n');
+    expect(parseFrontmatter(crlf)).toEqual(parseFrontmatter(lf));
+    expect(parseFrontmatter(crlf).data.follow_up).toBe('2026-11-04');
+  });
+});

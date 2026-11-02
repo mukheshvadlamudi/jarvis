@@ -27,7 +27,8 @@ function scalar(raw: string): unknown {
  * block lists (`- item`). Anything fancier is kept as a raw string.
  */
 export function parseFrontmatter(text: string): ParsedNote {
-  const src = text.replace(/^﻿/, '');
+  // Windows (and git autocrlf) checkouts use CRLF; parse everything as LF. Strip a UTF-8 BOM too.
+  const src = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   if (!src.startsWith('---')) return { data: {}, body: src, hasFrontmatter: false };
   const end = src.search(/\r?\n---\s*(\r?\n|$)/);
   if (end < 0) return { data: {}, body: src, hasFrontmatter: false };
