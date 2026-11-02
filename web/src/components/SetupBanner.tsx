@@ -10,11 +10,11 @@ export function SetupBanner() {
   if (!d || d.complete || d.dismissed) return null;
   return (
     <div className="setup-banner" role="status">
-      <PlugZap size={16} strokeWidth={1.5} color="var(--accent)" />
+      <PlugZap size={16} strokeWidth={1.5} color="var(--text-muted)" />
       <span style={{ flex: 1, minWidth: 180 }}>
-        Finish connecting Jarvis — <span className="mono">{d.progress.done}/{d.progress.total}</span> required steps done.
+        Finish connecting Jarvis <span className="faint">·</span> {d.progress.done} of {d.progress.total} required steps done
       </span>
-      <Link to="/setup" className="btn primary sm">
+      <Link to="/setup" className="btn sm">
         Continue setup
       </Link>
       <button

@@ -257,7 +257,7 @@ function SearchTab({ overview }: { overview: Overview | null }) {
               {selected ? (
                 <NoteView path={selected} caps={overview?.caps} onOpen={open} />
               ) : (
-                <Empty title="Pick a note to read it.">This is exactly what agents see when they call read_note. CORE.md and the task’s project note are preloaded; everything else is fetched on demand.</Empty>
+                <Empty title="Pick a note to read it">This is exactly what agents see when they call read_note. CORE.md and the task’s project note are preloaded; everything else is fetched on demand.</Empty>
               )}
             </div>
           </div>
@@ -309,7 +309,7 @@ function ProposalsTab() {
         </div>
         {pending.loading ? <SkeletonRows rows={2} /> : null}
         {!pending.loading && !list.length ? (
-          <Empty title="No memory changes to review.">Agents propose edits with save_memory. Daily-log, Inbox and Research appends apply on their own; CORE, Projects, People and Areas wait here.</Empty>
+          <Empty title="No memory changes to review">Agents propose edits with save_memory. Daily-log, Inbox and Research appends apply on their own; CORE, Projects, People and Areas wait here.</Empty>
         ) : null}
         {list.map((p) => (
           <div className="approval" key={p.id}>
@@ -344,7 +344,7 @@ function ProposalsTab() {
           <h2>Recent changes</h2>
         </div>
         {!done.length ? (
-          <Empty title="No changes yet.">Applied, rejected and failed proposals are listed here.</Empty>
+          <Empty title="No changes yet">Applied, rejected and failed proposals are listed here.</Empty>
         ) : (
           <ul className="list">
             {done.map((p) => (
@@ -408,7 +408,7 @@ function HealthTab({ overview }: { overview: Overview | null }) {
         {!overview ? (
           <SkeletonRows rows={1} />
         ) : !overview.sizes.length ? (
-          <Empty title="Everything is within its cap.">CORE.md stays under {tokens(overview.caps.core)} tokens and each project note under {tokens(overview.caps.project)}.</Empty>
+          <Empty title="Everything is within its cap">CORE.md stays under {tokens(overview.caps.core)} tokens and each project note under {tokens(overview.caps.project)}.</Empty>
         ) : (
           <ul className="list">
             {overview.sizes.map((s) => (
@@ -452,7 +452,7 @@ function HealthTab({ overview }: { overview: Overview | null }) {
           Suggestions toward the standard layout (CORE, Areas, Projects, People, Skills, Research, Journal). Jarvis never moves files — do it in Obsidian so links update.
         </p>
         {mig.loading ? <SkeletonRows rows={3} /> : null}
-        {!mig.loading && !items.length ? <Empty title="Your vault already matches the layout." /> : null}
+        {!mig.loading && !items.length ? <Empty title="Your vault already matches the layout" /> : null}
         <ul className="list" style={{ marginTop: 8 }}>
           {items.map((i, idx) => (
             <li key={idx} className="row" style={{ alignItems: 'flex-start' }}>

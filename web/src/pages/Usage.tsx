@@ -107,7 +107,7 @@ export default function Usage() {
               d.daily.some((x) => x.claude + x.codex > 0) ? (
                 <BarChart data={d.daily as unknown as Array<Record<string, number | string>>} series={SERIES} xLabel={(x) => new Date(`${x.date}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} />
               ) : (
-                <Empty title="No runs in this range.">Token totals come from each run’s final usage event.</Empty>
+                <Empty title="No runs in this range">Token totals come from each run’s final usage event.</Empty>
               )
             ) : (
               <Skeleton h={170} />
@@ -123,7 +123,7 @@ export default function Usage() {
               d.byType.length ? (
                 <BarChart data={d.byType as unknown as Array<Record<string, number | string>>} series={SERIES} xLabel={(x) => TYPE_LABEL[String(x.type)] ?? String(x.type)} />
               ) : (
-                <Empty title="No runs in this range." />
+                <Empty title="No runs in this range" />
               )
             ) : (
               <Skeleton h={170} />
@@ -142,7 +142,7 @@ export default function Usage() {
             <Skeleton />
           </div>
         ) : !d.routing.length ? (
-          <Empty title="No runs yet.">Every run records why it went to Claude or Codex — fallbacks show up here.</Empty>
+          <Empty title="No runs yet">Every run records why it went to Claude or Codex — fallbacks show up here.</Empty>
         ) : (
           <ul className="list">
             {(allRoutes ? d.routing : d.routing.slice(0, 12)).map((r) => (

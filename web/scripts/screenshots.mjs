@@ -57,7 +57,8 @@ try {
   ];
   if (only) pages = pages.filter((p) => only.includes(p.path) || only.includes(p.name));
   mkdirSync(outDir, { recursive: true });
-  const browser = await chromium.launch();
+  // PLAYWRIGHT_CHANNEL=msedge uses an installed Edge/Chrome instead of the downloaded Chromium.
+  const browser = await chromium.launch(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {});
   const viewports = [
     { tag: '375', width: 375, height: 812, mobile: true },
     { tag: '1440', width: 1440, height: 900, mobile: false },

@@ -49,11 +49,11 @@ export default function Approvals() {
         {res.loading ? <SkeletonRows rows={3} /> : null}
         {!res.loading && !list.length ? (
           view === 'pending' ? (
-            <Empty title="Nothing waiting for you.">
+            <Empty title="Nothing waiting for you">
               Pushes, PRs, emails, posts, purchases and deletes outside a task folder pause here until you approve them — from this page or Telegram.
             </Empty>
           ) : (
-            <Empty title="No decisions yet.">Approved, rejected and expired requests are kept here for reference.</Empty>
+            <Empty title="No decisions yet">Approved, rejected and expired requests are kept here for reference.</Empty>
           )
         ) : null}
         {list.map((a) => (

@@ -16,6 +16,7 @@ Read `SPEC.md` first. It is the source of truth for what to build; this file is 
 
 ## Design
 - Follow `docs/DESIGN.md` exactly. Premium, calm, dense — no AI-template look. Every UI PR attaches screenshots (375 and 1440 px, dark and light).
+- Run the vendored `unslop` skill (`.claude/skills/unslop`, CC BY 4.0, credit @heydamir) over every screen you add or change, and fix whatever its signs list finds before opening the PR.
 - Finished means finished: no placeholder pages, no "coming soon", no TODO stubs except what genuinely needs the owner's real logins (list those in the PR).
 
 ## Workflow

@@ -319,7 +319,7 @@ export default function Schedules() {
           <span className="count">{custom.length}</span>
         </div>
         {!res.loading && !custom.length ? (
-          <Empty title="No custom schedules yet." action={<button className="btn" onClick={() => setEditing('new')}><Plus size={14} strokeWidth={1.5} /> New schedule</button>}>
+          <Empty title="No custom schedules yet" action={<button className="btn" onClick={() => setEditing('new')}><Plus size={14} strokeWidth={1.5} /> New schedule</button>}>
             Recurring tasks like “chase unpaid invoices on the 15th” — each run creates a task you can watch and review.
           </Empty>
         ) : null}
@@ -338,7 +338,7 @@ export default function Schedules() {
           </span>
         </div>
         {hist.loading ? <SkeletonRows rows={3} /> : null}
-        {!hist.loading && !hist.data?.runs.length ? <Empty title="Nothing has run yet.">Use “Run now” to try a schedule immediately.</Empty> : null}
+        {!hist.loading && !hist.data?.runs.length ? <Empty title="Nothing has run yet">Use “Run now” to try a schedule immediately.</Empty> : null}
         <ul className="list">
           {(hist.data?.runs ?? []).map((r) => (
             <li key={r.id}>
