@@ -24,7 +24,7 @@ Desktop data lives in `%APPDATA%\Jarvis\data` (Windows), `~/Library/Application 
 | **ChatGPT Plus/Pro** subscription | Codex runs on it (the CLI ships inside Jarvis) |
 | A folder of notes (Obsidian vault) | Long-term memory. Any folder of `.md` files works |
 
-Optional: GitHub CLI (`gh`) for "Open PR", a Telegram bot for phone approvals, Tailscale for phone access.
+Optional: a microphone for hands-free voice. The voice models download once (~170 MB) and then run offline. Allow about 1 GB of RAM while voice is on, or use Settings → Voice → Light. Optional: GitHub CLI (`gh`) for "Open PR", a Telegram bot for phone approvals, Tailscale for phone access.
 **Not needed:** API keys, Docker, Python, a database server, global installs of `claude` or `codex`.
 
 ## Install

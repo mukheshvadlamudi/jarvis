@@ -1,6 +1,8 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { Services } from '../app.ts';
+import { MAX_HANDOFF_CHAIN } from '../collab/index.ts';
+import type { Collaboration } from '../collab/index.ts';
 import { all, get } from '../db/index.ts';
 import type { MemoryProposals } from '../memory/proposals.ts';
 import type { VaultIndex } from '../memory/vault.ts';
@@ -151,6 +153,20 @@ export class McpHub {
         const line = (agent: 'claude' | 'codex') =>
           `${agent}: 5h ${u[agent].five_hour ? `${Math.round(u[agent].five_hour!.usedPercent)}%` : 'unknown'}, weekly ${u[agent].weekly ? `${Math.round(u[agent].weekly!.usedPercent)}%` : 'unknown'}`;
         return { text: `${line('claude')}\n${line('codex')}\nRouter falls back at ${s.config.get().router.fallbackAtPercent}%.` };
+      }
+      case 'consult_agent': {
+        const collab = s.modules.collab as { consult: (c: RunCtx, q: string, ctx?: string) => Promise<{ ok: boolean; text: string }> } | undefined;
+        if (!collab) return { text: 'Collaboration is not available.', isError: true };
+        const r = await collab.consult(ctx, str('question'), str('context'));
+        return { text: r.text, isError: !r.ok };
+      }
+      case 'handoff_to_agent': {
+        const t = s.tasks.get(ctx.taskId);
+        if (!t) return { text: 'Unknown task.', isError: true };
+        const collab = s.modules.collab as Collaboration | undefined;
+        if (collab && collab.handoffDepth(t) >= MAX_HANDOFF_CHAIN) return { text: `Handoff limit reached (${MAX_HANDOFF_CHAIN} in a row). Finish and summarise your work instead.`, isError: true };
+        s.tasks.patch(ctx.taskId, { then_json: JSON.stringify({ agent: 'other', mode: str('mode') === 'continue' ? 'continue' : 'review', instructions: str('instructions') }) });
+        return { text: 'Noted: the other agent will pick this up when you finish. Finish your work and summarise it clearly.' };
       }
       default:
         return { text: `Unknown tool ${tool}.`, isError: true };

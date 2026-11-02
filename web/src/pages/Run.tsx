@@ -1,6 +1,8 @@
 import { AlertCircle, ArrowLeft, CircleStop, FileDiff, Globe, ListChecks, RotateCcw, Send, Terminal, Wrench } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApprovalCard } from '../components/ApprovalCard.tsx';
+import { CollabPanel, ConsultBlock } from '../components/Collab.tsx';
+import { OutputsPanel } from '../components/Outputs.tsx';
 import { AgentBadge, Disclosure, Empty, ErrorBox, Link, MicButton, Skeleton, StatusLabel } from '../components/ui.tsx';
 import { api, post } from '../lib/api.ts';
 import { clock, dateTime, duration, TYPE_LABEL, tokens } from '../lib/format.ts';
@@ -30,6 +32,7 @@ type Item =
   | { kind: 'tool'; call: RunEvent; result?: RunEvent }
   | { kind: 'file'; evs: RunEvent[] }
   | { kind: 'status'; ev: RunEvent }
+  | { kind: 'consult'; asked: RunEvent; answered?: RunEvent }
   | { kind: 'error'; ev: RunEvent };
 
 function buildItems(events: RunEvent[]): Item[] {
@@ -49,7 +52,13 @@ function buildItems(events: RunEvent[]): Item[] {
       else items.push({ kind: 'file', evs: [ev] });
     } else if (ev.kind === 'message') items.push({ kind: 'message', ev });
     else if (ev.kind === 'error') items.push({ kind: 'error', ev });
-    else if (ev.kind === 'status') items.push({ kind: 'status', ev });
+    else if (ev.kind === 'status' && ev.payload.status === 'consult') {
+      if (ev.payload.phase === 'answered') {
+        const open = [...items].reverse().find((x) => x.kind === 'consult' && !x.answered && x.asked.payload.question === ev.payload.question) as { answered?: RunEvent } | undefined;
+        if (open) open.answered = ev;
+        else items.push({ kind: 'consult', asked: ev, answered: ev });
+      } else items.push({ kind: 'consult', asked: ev });
+    } else if (ev.kind === 'status') items.push({ kind: 'status', ev });
   }
   return items;
 }
@@ -352,6 +361,7 @@ export default function RunPage({ params }: PageProps) {
             ) : null}
             {items.map((it, i) => {
               if (it.kind === 'tool') return <ToolRow key={i} call={it.call} result={it.result} />;
+              if (it.kind === 'consult') return <ConsultBlock key={i} asked={it.asked} answered={it.answered} />;
               if (it.kind === 'file')
                 return (
                   <div key={i} style={{ padding: '2px 0' }}>
@@ -472,6 +482,9 @@ export default function RunPage({ params }: PageProps) {
               )}
             </div>
           </div>
+
+          {task ? <OutputsPanel taskId={task.id} live={live} /> : null}
+          {task ? <CollabPanel task={task} /> : null}
 
           <div className="panel">
             <div className="panel-head">

@@ -1,6 +1,8 @@
 import type { Hono } from 'hono';
 import type { Services } from '../app.ts';
+import { registerCollabRoutes } from './collab.ts';
 import { registerCoreRoutes } from './core.ts';
+import { registerOutputRoutes } from './outputs.ts';
 import { registerMcpRoutes } from './mcp.ts';
 import { registerMemoryRoutes } from './memory.ts';
 import { registerScheduleRoutes } from './schedules.ts';
@@ -17,4 +19,6 @@ export function registerRoutes(app: Hono, s: Services): void {
   registerScheduleRoutes(app, s);
   registerWorkspaceRoutes(app, s);
   registerSetupRoutes(app, s);
+  registerCollabRoutes(app, s);
+  registerOutputRoutes(app, s);
 }

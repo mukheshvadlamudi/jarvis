@@ -9,6 +9,8 @@ export interface McpServerSpec {
 
 export interface RunInput {
   taskId: string;
+  /** Which agent this run is for (informational; the registry already picked the runner). */
+  agent?: AgentId;
   runId: string;
   prompt: string;
   contextPrefix: string;
@@ -23,6 +25,10 @@ export interface RunInput {
   additionalDirectories?: string[];
   mcpServers?: Record<string, McpServerSpec>;
   vaultPath?: string;
+  /** Harness effort for this run (agent-specific value); undefined = CLI default. */
+  effort?: string;
+  /** Model override; undefined = CLI/plan default. */
+  model?: string;
 }
 
 export interface NormalizedEvent {

@@ -195,3 +195,15 @@ describe('codex runner (SDK mocked)', () => {
     expect(r).toMatchObject({ status: 'failed', error: 'usage limit reached' });
   });
 });
+
+describe('harness effort and model', () => {
+  it('passes effort and model to Claude Code and Codex only when set', () => {
+    const { s } = sink();
+    const c = buildClaudeOptions({ ...input, effort: 'high', model: 'claude-opus-5-5' }, s, new AbortController(), {});
+    expect(c).toMatchObject({ effort: 'high', model: 'claude-opus-5-5' });
+    expect('effort' in buildClaudeOptions(input, s, new AbortController(), {})).toBe(false);
+    const x = buildCodexOptions({ ...input, effort: 'xhigh', model: 'gpt-5.3-codex' }, {});
+    expect(x.thread).toMatchObject({ modelReasoningEffort: 'xhigh', model: 'gpt-5.3-codex' });
+    expect('modelReasoningEffort' in buildCodexOptions(input, {}).thread).toBe(false);
+  });
+});

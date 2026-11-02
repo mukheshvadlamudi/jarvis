@@ -10,6 +10,8 @@ import { connectLive, disconnectLive, useLiveState } from './lib/live.ts';
 import { match, navigate, useLocation } from './lib/router.ts';
 import { toggleTheme } from './lib/theme.ts';
 import { desktop } from './lib/desktop.ts';
+import { VoiceDock, VoiceToggle } from './components/VoiceDock.tsx';
+import { startVoiceController } from './voice/controller.ts';
 import { routes } from './routes.ts';
 import type { PageProps, RouteDef } from './routes.ts';
 
@@ -115,6 +117,7 @@ export function App() {
   const summary = useApi<Summary>(locked ? null : '/api/summary', ['task.*', 'approval.*', 'run.started', 'run.finished', 'hello']);
 
   useEffect(() => onUnauthorized(() => setLocked(true)), []);
+  useEffect(() => (locked ? undefined : startVoiceController()), [locked]);
   useEffect(() => {
     if (!desktop) return;
     document.documentElement.classList.add('desktop', `desktop-${desktop.platform}`);
@@ -240,9 +243,12 @@ export function App() {
           <button className="btn primary" onClick={() => setCaptureOpen(true)}>
             <Plus size={16} strokeWidth={1.5} /> New task <kbd style={{ marginLeft: 4, background: 'transparent', borderColor: 'rgba(0,0,0,.25)', color: 'inherit' }}>C</kbd>
           </button>
-          <button className="btn ghost sm" onClick={toggleTheme}>
-            Toggle theme
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <VoiceToggle compact />
+            <button className="btn ghost sm" onClick={toggleTheme} style={{ flex: 1 }}>
+              Theme
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -306,6 +312,7 @@ export function App() {
 
       {paletteOpen ? <Palette onClose={() => setPaletteOpen(false)} onCapture={() => setCaptureOpen(true)} /> : null}
       {captureOpen ? <CaptureSheet onClose={() => setCaptureOpen(false)} /> : null}
+      <VoiceDock />
       <Toasts />
     </div>
   );
@@ -318,6 +325,7 @@ function MorePage({ badgeFor }: { badgeFor: (r: RouteDef) => number }) {
       <header className="page-head">
         <h1>More</h1>
         <div className="actions">
+          <VoiceToggle compact />
           <button className="btn ghost sm" onClick={toggleTheme}>
             Toggle theme
           </button>

@@ -26,6 +26,13 @@ export interface JarvisConfig {
   classifier: { useAgent: boolean };
   feeds: { fetchEveryHours: number };
   telegram: { enabled: boolean };
+  /** Per-agent harness settings. Empty strings mean "use the CLI's own default". */
+  agents: {
+    claude: { model: string; effort: { low: string; medium: string; high: string } };
+    codex: { model: string; effort: { low: string; medium: string; high: string } };
+  };
+  collaboration: { maxConsultsPerTask: number; autoHandoffReview: boolean };
+  voice: { enabled: boolean };
 }
 
 export const DEFAULT_CONFIG: JarvisConfig = {
@@ -43,7 +50,16 @@ export const DEFAULT_CONFIG: JarvisConfig = {
   classifier: { useAgent: false },
   feeds: { fetchEveryHours: 6 },
   telegram: { enabled: true },
+  agents: {
+    claude: { model: '', effort: { low: 'low', medium: '', high: 'high' } },
+    codex: { model: '', effort: { low: 'low', medium: '', high: 'high' } },
+  },
+  collaboration: { maxConsultsPerTask: 2, autoHandoffReview: false },
+  voice: { enabled: true },
 };
+
+export const CLAUDE_EFFORTS = ['', 'low', 'medium', 'high', 'xhigh', 'max'];
+export const CODEX_EFFORTS = ['', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 
 export interface Env {
   bind: string;
@@ -146,6 +162,14 @@ export function validateConfig(c: JarvisConfig): string[] {
   if (c.usage.claudeSoftCaps.fiveHourTokens <= 0 || c.usage.claudeSoftCaps.weeklyTokens <= 0) errors.push('usage.claudeSoftCaps must be positive');
   if (c.approvals.expiryHours <= 0) errors.push('approvals.expiryHours must be positive');
   if (c.feeds.fetchEveryHours < 1) errors.push('feeds.fetchEveryHours must be at least 1');
+  for (const level of ['low', 'medium', 'high'] as const) {
+    if (!CLAUDE_EFFORTS.includes(c.agents.claude.effort[level])) errors.push(`agents.claude.effort.${level} must be one of ${CLAUDE_EFFORTS.filter(Boolean).join(', ')} (or empty)`);
+    if (!CODEX_EFFORTS.includes(c.agents.codex.effort[level])) errors.push(`agents.codex.effort.${level} must be one of ${CODEX_EFFORTS.filter(Boolean).join(', ')} (or empty)`);
+  }
+  for (const a of ['claude', 'codex'] as const) {
+    if (!/^[\w.:\-\[\]]*$/.test(c.agents[a].model)) errors.push(`agents.${a}.model has unexpected characters`);
+  }
+  if (!Number.isInteger(c.collaboration.maxConsultsPerTask) || c.collaboration.maxConsultsPerTask < 0 || c.collaboration.maxConsultsPerTask > 5) errors.push('collaboration.maxConsultsPerTask must be 0–5');
   return errors;
 }
 

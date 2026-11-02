@@ -29,6 +29,16 @@ export const TOOL_DEFS: ToolDef[] = [
     inputSchema: { type: 'object', properties: { summary: str('One sentence: exactly what will happen'), reason: str('Why it is needed'), payload: str('The exact command, message or request body'), kind: str('Short category, e.g. send_email, git_push, purchase') }, required: ['summary', 'reason', 'payload'], additionalProperties: false },
   },
   {
+    name: 'consult_agent',
+    description: 'Ask the OTHER agent (Claude ↔ Codex) for a second opinion mid-task: a design choice, a tricky bug, a review of a diff or draft. It reads your working folder (read-only) and answers in one short reply. Limited per task — use it for decisions that matter.',
+    inputSchema: { type: 'object', properties: { question: str('A specific question'), context: str('Relevant code, diff, draft or findings (keep it short)') }, required: ['question'], additionalProperties: false },
+  },
+  {
+    name: 'handoff_to_agent',
+    description: 'When you finish, queue a follow-on task for the other agent: "review" (read-only check of your work in the same folder) or "continue" (build on it). Use when the other agent is better suited for the next step.',
+    inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['review', 'continue'] }, instructions: str('What the other agent should do') }, required: ['mode'], additionalProperties: false },
+  },
+  {
     name: 'create_task',
     description: 'Create a follow-up task for later (it is queued unless run is false).',
     inputSchema: { type: 'object', properties: { title: str('One line'), body: str('Details'), type: { type: 'string', enum: ['code', 'research', 'write', 'admin', 'update', 'memory', 'other'] }, project: str('Project name'), agent: { type: 'string', enum: ['auto', 'claude', 'codex'] }, run: { type: 'boolean', description: 'Queue now (default) or park in the inbox' } }, required: ['title'], additionalProperties: false },

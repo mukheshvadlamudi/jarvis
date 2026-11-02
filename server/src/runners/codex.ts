@@ -47,6 +47,8 @@ export function buildCodexOptions(input: RunInput, env: NodeJS.ProcessEnv): { co
     networkAccessEnabled: input.allowNetwork,
     webSearchMode: input.webSearch ? 'live' : 'disabled',
     additionalDirectories: input.additionalDirectories,
+    ...(input.effort ? { modelReasoningEffort: input.effort as NonNullable<ThreadOptions['modelReasoningEffort']> } : {}),
+    ...(input.model ? { model: input.model } : {}),
   };
   return { codex: { env: sanitizedAgentEnv(env), config }, thread };
 }

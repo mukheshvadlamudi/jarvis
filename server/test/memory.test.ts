@@ -58,8 +58,10 @@ describe('vault index', () => {
     ctx = makeCtx();
     const { vault } = memoryOf(ctx.s);
     vault.watch(50);
+    // macOS FSEvents can drop writes made in the first moments after a stream starts, and delivers late.
+    await new Promise((r) => setTimeout(r, 400));
     writeFileSync(join(ctx.s.env.vault, 'Areas/Garden.md'), '# Garden\n\nPlant garlic before the first frost.');
-    await waitFor(() => vault.search('garlic').length > 0, 4000);
+    await waitFor(() => vault.search('garlic').length > 0, 10_000);
     expect(vault.search('garlic')[0].path).toBe('Areas/Garden.md');
   });
 });

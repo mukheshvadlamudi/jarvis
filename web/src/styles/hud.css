@@ -469,3 +469,204 @@ body {
     top: auto;
   }
 }
+
+/* ----- Voice dock ----- */
+.voice-dock {
+  position: fixed;
+  z-index: 60;
+  left: calc(var(--sidebar-w) + var(--s4));
+  bottom: var(--s4);
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  max-width: min(520px, calc(100vw - var(--sidebar-w) - 32px));
+  padding: 8px 8px 8px 10px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-raised) 94%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-overlay), var(--glow-soft);
+  animation: rise var(--t) var(--ease);
+}
+.voice-dock.error {
+  border-color: var(--danger);
+}
+.voice-ring {
+  width: 36px;
+  height: 36px;
+  flex: none;
+}
+.voice-ring-outer {
+  transform-origin: 20px 20px;
+  animation: reactor-spin 12s linear infinite;
+}
+.voice-ring.hearing .voice-ring-outer,
+.voice-ring.speaking .voice-ring-outer {
+  stroke: var(--accent);
+  animation-duration: 3s;
+}
+.voice-core-pulse {
+  animation: pulse 1.2s var(--ease) infinite;
+}
+.voice-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.voice-state {
+  font: 500 var(--fs-11) var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+.voice-hint {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 360px;
+}
+.btn.voice-on {
+  border-color: var(--accent-line);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+@media (max-width: 767px) {
+  .voice-dock {
+    left: var(--s3);
+    right: var(--s3);
+    max-width: none;
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--s2));
+  }
+  .voice-hint {
+    max-width: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-ring-outer,
+  .voice-core-pulse {
+    animation: none;
+  }
+}
+
+/* ----- Consults and handoffs ----- */
+.consult {
+  margin: 6px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--agent-claude);
+  border-radius: var(--r-control);
+  background: var(--bg-sunken);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--fs-13);
+}
+.consult.agent-codex {
+  border-left-color: var(--agent-codex);
+}
+.consult-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 var(--fs-11) var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.consult-q {
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.consult-a {
+  display: flex;
+  gap: 6px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.collab-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--fs-12);
+  min-width: 0;
+}
+.collab-link a {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+/* ----- Outputs ----- */
+.out-code {
+  max-height: 62vh;
+  overflow: auto;
+}
+.out-media {
+  max-width: 100%;
+  border-radius: var(--r-control);
+  border: 1px solid var(--border);
+  display: block;
+}
+.out-frame {
+  width: 100%;
+  height: 66vh;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: #fff;
+}
+.out-table-wrap {
+  overflow: auto;
+  max-height: 62vh;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+}
+.out-table {
+  border-collapse: collapse;
+  font-size: var(--fs-12);
+  width: 100%;
+}
+.out-table th,
+.out-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+.out-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-raised);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.out-table td.num {
+  text-align: right;
+}
+.out-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+@media (max-width: 767px) {
+  .out-foot > span:last-child {
+    width: 100%;
+  }
+  .out-foot input {
+    flex: 1;
+    min-width: 0;
+  }
+  .out-foot a.btn {
+    flex: 1;
+    justify-content: center;
+  }
+}

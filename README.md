@@ -39,7 +39,7 @@ Try everything without touching your plans: `JARVIS_RUNNER=mock` gives scripted 
 |---|---|
 | Home | Command bar (dictation, live type/project/agent preview), Needs you, Running now, plan usage, today's routines, follow-ups |
 | Board | Inbox → Queued → Running → Needs you → Done; drag or `[`/`]`; run with Claude or Codex |
-| Run view | Live transcript, tool calls, file changes, context inspector, tokens; Stop / follow-up / run again |
+| Run view | Live transcript, tool calls, file changes, consults between agents, context inspector, tokens; Outputs panel (preview, download, save to vault); hand off to the other agent for review or to continue; Stop / follow-up / run again |
 | Approvals | Everything outward-facing waits here (and in Telegram) |
 | Research | Reports saved to `Research/` with sources; follow-ups continue the same session |
 | Updates | RSS/Atom/GitHub releases and page-change feeds; daily digest |
@@ -49,7 +49,10 @@ Try everything without touching your plans: `JARVIS_RUNNER=mock` gives scripted 
 | Skills | Vault skills, sync to Claude/Codex, agent-proposed skills |
 | Schedules | Cron schedules and built-in routines with missed-run catch-up |
 | Usage | Plan windows, per-day/per-type tokens, routing decisions |
-| Settings | Routing rules, concurrency, budgets, Telegram, theme |
+| Settings | Routing rules, agent model and reasoning effort, collaboration, concurrency, budgets, voice, Telegram, theme |
+| Voice | Hands-free: say “Jarvis, …”. Kokoro speaks approvals and results, Whisper listens. All on your device, no credits |
+
+**Agents use their own harnesses.** Claude tasks run in the real Claude Code (via the Claude Agent SDK), and Codex tasks run in the real Codex CLI (via the Codex SDK). Each keeps its own tools, project instructions and skills. Jarvis only routes the work, adds memory context, enforces approvals, and lets the two agents consult each other or hand work off.
 
 ## Tests
 ```
