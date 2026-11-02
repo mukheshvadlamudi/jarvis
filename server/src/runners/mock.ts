@@ -55,7 +55,7 @@ function stepsFor(input: RunInput, scenario: MockScenario): Step[] {
       tool: 'Bash',
       input: { command: `git push -u origin jarvis/${input.taskId}` },
       kind: 'git_push',
-      summary: `Push branch jarvis/${input.taskId} to origin`,
+      summary: `Push jarvis/${input.taskId} to origin`,
       reason: 'Tests pass locally; pushing so a PR can be opened.',
     });
     steps.push(msg('Branch pushed. Ready for review.'));

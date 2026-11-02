@@ -75,13 +75,13 @@ const TASKS: SeedTask[] = [
   {
     title: 'Push the session-lock fix for ClientEasy and open a PR', type: 'code', status: 'needs_you', project: 'clienteasy', agent: 'claude', ageH: 1.4, outward: true, priority: 2,
     reason: 'outward action → claude (per-tool approvals)',
-    approval: { kind: 'git_push', summary: 'Bash: git push -u origin jarvis/t_8k2m-session-lock', command: 'git push -u origin jarvis/t_8k2m-session-lock', reason: 'All 128 tests pass; pushing so the PR can be opened.' },
+    approval: { kind: 'git_push', summary: 'Push jarvis/t_8k2m-session-lock to origin', command: 'git push -u origin jarvis/t_8k2m-session-lock', reason: 'All 128 tests pass; pushing so the PR can be opened.' },
     events: codeEvents('src/auth/session.ts', 'test/auth/session.test.ts').slice(0, 13), tokens: [61200, 4100], toolCalls: 5,
   },
   {
     title: 'Reply to Dr. Patel about the November invoice', body: 'She asked whether the October overage is included. It is not — draft a short, friendly reply with the corrected total.', type: 'admin', status: 'needs_you', project: 'northwind', agent: 'claude', ageH: 3.2, outward: true, priority: 1,
     reason: 'outward action → claude (per-tool approvals)',
-    approval: { kind: 'outward_mcp', summary: 'mcp__gmail__send_message: Re: November invoice — Northwind Dental', command: 'to: priya.patel@northwind-dental.example\nsubject: Re: November invoice\n\nHi Priya,\n\nThe October overage (2.5 h) is billed separately, so November comes to £1,840. Updated invoice attached.\n\nBest,\nMukhesh', reason: 'Draft is ready; sending needs your OK.' },
+    approval: { kind: 'outward_mcp', summary: 'Send “Re: November invoice” to priya.patel@northwind-dental.example', command: 'to: priya.patel@northwind-dental.example\nsubject: Re: November invoice\n\nHi Priya,\n\nThe October overage (2.5 h) is billed separately, so November comes to £1,840. Updated invoice attached.\n\nBest,\nMukhesh', reason: 'Draft is ready; sending needs your OK.' },
     events: [
       ['status', { status: 'started', detail: 'Claude Code · data/workdirs' }],
       ['tool_call', { id: 'toolu_1', tool: 'mcp__gmail__search_threads', input: { query: 'from:priya.patel invoice' } }],
@@ -194,23 +194,23 @@ export function seedIfEmpty(s: Services, now = Date.now()): boolean {
 
     // A decided approval for history.
     run(s.db, `INSERT INTO approvals (id, run_id, task_id, kind, summary, detail_json, status, created_at, decided_at, decided_via, note)
-      VALUES (?, NULL, NULL, 'git_push', 'Bash: git push origin jarvis/t_7pd-release-notes', ?, 'approved', ?, ?, 'web', 'Looks good')`,
+      VALUES (?, NULL, NULL, 'git_push', 'Push jarvis/t_7pd-release-notes to origin', ?, 'approved', ?, ?, 'web', 'Looks good')`,
       newId('a'), JSON.stringify({ tool: 'Bash', input: { command: 'git push origin jarvis/t_7pd-release-notes' }, reason: 'Release notes reviewed.' }), iso(now - 78 * H), iso(now - 77.6 * H));
 
     // 14 days of background runs so the usage charts have shape.
-    const kinds: Array<[TaskType, AgentId, string]> = [
-      ['code', 'claude', 'Refactor the ClientEasy clients table into smaller components'],
-      ['research', 'codex', 'Find a cheaper SMS provider for appointment reminders'],
-      ['admin', 'codex', 'Triage inbox and file receipts'],
-      ['write', 'claude', 'Draft the Northwind newsletter intro'],
-      ['update', 'codex', 'Updates digest'],
-      ['code', 'claude', 'Fix timezone bug in booking confirmations'],
-      ['memory', 'codex', 'Memory consolidation'],
+    const kinds: Array<[TaskType, AgentId, string, string]> = [
+      ['code', 'claude', 'Refactor the ClientEasy clients table into smaller components', 'Split ClientsTable into 4 components; no behaviour change, 41 tests pass.'],
+      ['research', 'codex', 'Find a cheaper SMS provider for appointment reminders', 'Twilio → Plivo saves ~38% at 2k SMS/month; UK sender IDs supported. Report saved to Research.'],
+      ['admin', 'codex', 'Triage inbox and file receipts', '9 threads triaged, 3 receipts filed to Finances, 1 reply drafted (not sent).'],
+      ['write', 'claude', 'Draft the Northwind newsletter intro', 'Intro drafted (180 words) in the clinic’s friendly tone; two subject-line options included.'],
+      ['update', 'codex', 'Updates digest', '6 new items: 2 security releases worth applying, 4 minor.'],
+      ['code', 'claude', 'Fix timezone bug in booking confirmations', 'Confirmations now render in the clinic’s timezone; added a DST regression test.'],
+      ['memory', 'codex', 'Memory consolidation', 'Proposed 3 edits: 2 stale facts removed, 1 project note trimmed under its cap.'],
     ];
     for (let day = 13; day >= 1; day--) {
       const count = 2 + ((day * 7) % 4);
       for (let i = 0; i < count; i++) {
-        const [type, agent, title] = kinds[(day + i) % kinds.length];
+        const [type, agent, title, summary] = kinds[(day + i) % kinds.length];
         const id = newId('t');
         const at = now - day * D + (9 + i * 2.5) * H;
         const scale = agent === 'claude' ? 1 : 0.7;
@@ -218,7 +218,7 @@ export function seedIfEmpty(s: Services, now = Date.now()): boolean {
         const outTok = Math.round(inTok * 0.07);
         run(s.db, `INSERT INTO tasks (id, title, body, type, status, priority, agent_pref, agent, effort, created_at, updated_at, result_summary, route_reason)
           VALUES (?, ?, '', ?, 'done', 0, 'auto', ?, 'medium', ?, ?, ?, ?)`,
-          id, title, type, agent, iso(at), iso(at + 0.4 * H), 'Completed.', `${type} → ${agent}`);
+          id, title, type, agent, iso(at), iso(at + 0.4 * H), summary, `${type} → ${agent}`);
         run(s.db, `INSERT INTO runs (id, task_id, agent, cwd, started_at, ended_at, status, input_tokens, output_tokens, cached_tokens, tool_calls, route_reason, context_report_json)
           VALUES (?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?)`,
           newId('r'), id, agent, `data/workdirs/${id}`, iso(at), iso(at + 0.4 * H), inTok, outTok, inTok * 3, 3 + ((day + i) % 9), `${type} → ${agent}`,
@@ -227,15 +227,22 @@ export function seedIfEmpty(s: Services, now = Date.now()): boolean {
     }
 
     // Plan usage history: 5-hour windows rising and resetting, weekly climbing.
-    for (let h = 7 * 24; h >= 2; h -= 2) {
+    let c5 = 0;
+    let x5 = 0;
+    for (let h = 7 * 24; h >= 1; h--) {
       const ts = now - h * H;
-      const phase = (h % 5) / 5;
-      const dayFactor = new Date(ts).getHours() >= 8 && new Date(ts).getHours() <= 22 ? 1 : 0.2;
-      const c5 = Math.round((1 - phase) * 70 * dayFactor);
-      const x5 = Math.round((1 - phase) * 45 * dayFactor);
-      const nextReset = ts + (5 - (h % 5)) * H;
-      run(s.db, `INSERT INTO usage_snapshots (ts, agent, window, used_percent, resets_at, source) VALUES (?, 'claude', 'five_hour', ?, ?, 'claude-sdk')`, iso(ts), c5, iso(nextReset));
-      run(s.db, `INSERT INTO usage_snapshots (ts, agent, window, used_percent, resets_at, source) VALUES (?, 'codex', 'five_hour', ?, ?, 'codex-session-log')`, iso(ts), x5, iso(nextReset));
+      const hour = new Date(ts).getHours();
+      if (h % 5 === 0) {
+        c5 = 0;
+        x5 = 0;
+      }
+      const active = hour >= 8 && hour <= 22 ? 1 : 0;
+      const wiggle = ((h * 37) % 11) / 10;
+      c5 = Math.min(96, c5 + active * (9 + wiggle * 14));
+      x5 = Math.min(90, x5 + active * (5 + wiggle * 9));
+      const nextReset = ts + (h % 5 || 5) * H;
+      run(s.db, `INSERT INTO usage_snapshots (ts, agent, window, used_percent, resets_at, source) VALUES (?, 'claude', 'five_hour', ?, ?, 'claude-sdk')`, iso(ts), Math.round(c5), iso(nextReset));
+      run(s.db, `INSERT INTO usage_snapshots (ts, agent, window, used_percent, resets_at, source) VALUES (?, 'codex', 'five_hour', ?, ?, 'codex-session-log')`, iso(ts), Math.round(x5), iso(nextReset));
     }
     const weekReset = now + 2.6 * D;
     run(s.db, `INSERT INTO usage_snapshots (ts, agent, window, used_percent, resets_at, source) VALUES (?, 'claude', 'five_hour', 62, ?, 'claude-sdk')`, iso(now - 60_000), iso(now + 2.2 * H));

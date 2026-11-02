@@ -165,3 +165,36 @@ export function classifyToolCall(ctx: ToolCallContext): RiskVerdict {
 
 /** Keyword heuristic used by the classifier to flag tasks that will act outward. */
 export const OUTWARD_TASK = /(^\s*(email|e-mail|reply|message|text|post|tweet|dm)\b)|\b(send|reply to|publish|tweet|push|deploy|open (a )?pr|pull request|merge|invite|share with|purchase|buy|pay for|book an? )\b/i;
+
+/** One plain sentence describing what an approval will let the agent do. */
+export function humanSummary(kind: string, tool: string, input: Record<string, unknown>): string {
+  const cmd = typeof input.command === 'string' ? input.command.trim() : '';
+  const path = typeof input.file_path === 'string' ? input.file_path : typeof input.path === 'string' ? input.path : '';
+  switch (kind) {
+    case 'git_push': {
+      const m = /push\s+(?:-[-\w]+\s+)*(\S+)?\s*(\S+)?/.exec(cmd);
+      const remote = m?.[1] && !m[1].startsWith('-') ? m[1] : 'the remote';
+      return m?.[2] ? `Push ${m[2]} to ${remote}` : `Push commits to ${remote}`;
+    }
+    case 'pull_request':
+      return /merge/.test(cmd) ? 'Merge a pull request on GitHub' : 'Open a pull request on GitHub';
+    case 'publish':
+      return 'Publish a package or release';
+    case 'http_write':
+      return 'Send data to a web service';
+    case 'send_email':
+      return 'Send an email';
+    case 'delete_outside':
+      return 'Delete files outside the task folder';
+    case 'write_outside':
+      return `Write ${path || 'a file'} outside the task folder`;
+    case 'outward_mcp': {
+      const name = tool.split('__').slice(2).join(' ') || tool;
+      const to = typeof input.to === 'string' ? ` to ${input.to}` : '';
+      const subject = typeof input.subject === 'string' ? ` “${input.subject}”` : '';
+      return `${name.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())}${subject}${to}`;
+    }
+    default:
+      return `${tool}: ${cmd || path || 'run a risky action'}`;
+  }
+}

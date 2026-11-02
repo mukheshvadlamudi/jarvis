@@ -49,7 +49,7 @@ describe('claude runner (SDK mocked)', () => {
   });
 
   it('routes risky tools through approvals and blocks credential access', async () => {
-    const { s, approvals } = sink((r) => !r.summary.includes('gh pr'));
+    const { s, approvals } = sink((r) => r.kind !== 'pull_request');
     const o = buildClaudeOptions(input, s, new AbortController(), {});
     const opts = { signal: new AbortController().signal, toolUseID: 'x' } as Parameters<NonNullable<typeof o.canUseTool>>[2];
     expect(await o.canUseTool!('Bash', { command: 'npm test' }, opts)).toMatchObject({ behavior: 'allow' });
@@ -57,6 +57,7 @@ describe('claude runner (SDK mocked)', () => {
     expect(await o.canUseTool!('Bash', { command: 'gh pr create --fill' }, opts)).toMatchObject({ behavior: 'deny' });
     expect(await o.canUseTool!('Read', { file_path: '/h/.claude/.credentials.json' }, opts)).toMatchObject({ behavior: 'deny' });
     expect(approvals.map((a) => a.kind)).toEqual(['git_push', 'pull_request']);
+    expect(approvals[0].summary).toBe('Push main to origin');
     const hook = o.hooks!.PreToolUse![0].hooks[0];
     const pre = (tool: string, toolInput: unknown) => hook({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: toolInput, tool_use_id: 'u', session_id: 's', transcript_path: '', cwd: '/work/t_1' } as never, 'u', { signal: new AbortController().signal });
     expect(await pre('Bash', { command: 'git push' })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'ask' } });

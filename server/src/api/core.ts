@@ -21,6 +21,10 @@ export function bad(c: Context, message: string, status: 400 | 404 | 409 = 400) 
   return c.json({ error: status === 404 ? 'not_found' : 'bad_request', message }, status);
 }
 
+function withDetail(rows: Array<Record<string, unknown>>, s: Services) {
+  return rows.map((a) => ({ ...a, detail: JSON.parse(String(a.detail_json ?? '{}')), live: s.approvals.hasWaiter(String(a.id)) }));
+}
+
 export function registerCoreRoutes(app: Hono, s: Services): void {
   const started = Date.now();
 
@@ -105,7 +109,7 @@ export function registerCoreRoutes(app: Hono, s: Services): void {
     const t = s.tasks.get(c.req.param('id'));
     if (!t) return bad(c, 'No task with that id. It may have been deleted.', 404);
     const runs = s.orchestrator.runsForTask(t.id);
-    const approvals = all(s.db, 'SELECT * FROM approvals WHERE task_id = ? ORDER BY created_at DESC', t.id);
+    const approvals = withDetail(all(s.db, 'SELECT * FROM approvals WHERE task_id = ? ORDER BY created_at DESC', t.id), s);
     const project = t.project_id ? get<Project>(s.db, 'SELECT * FROM projects WHERE id = ?', t.project_id) : null;
     return c.json({ task: t, runs, approvals, project, active: s.orchestrator.isActive(t.id) });
   });
@@ -167,7 +171,7 @@ export function registerCoreRoutes(app: Hono, s: Services): void {
     const r = s.orchestrator.getRun(c.req.param('id'));
     if (!r) return bad(c, 'No run with that id.', 404);
     const task = s.tasks.get(r.task_id);
-    const approvals = all(s.db, 'SELECT * FROM approvals WHERE run_id = ? ORDER BY created_at', r.id);
+    const approvals = withDetail(all(s.db, 'SELECT * FROM approvals WHERE run_id = ? ORDER BY created_at', r.id), s);
     return c.json({ run: { ...r, context_report: r.context_report_json ? JSON.parse(r.context_report_json) : null }, task, approvals, live: s.orchestrator.isActive(r.task_id) && r.status === 'running' });
   });
 

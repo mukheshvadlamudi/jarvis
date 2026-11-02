@@ -11,7 +11,7 @@ import type {
   SDKMessage,
   SDKRateLimitInfo,
 } from '@anthropic-ai/claude-agent-sdk';
-import { classifyToolCall } from '../approvals/policy.ts';
+import { classifyToolCall, humanSummary } from '../approvals/policy.ts';
 import { sanitizedAgentEnv } from '../util/env.ts';
 import type { AgentRunner, RunEventSink, RunHandle, RunInput, RunResult } from './types.ts';
 import { describeToolInput, emptyUsage } from './types.ts';
@@ -95,7 +95,7 @@ export function buildClaudeOptions(input: RunInput, sink: RunEventSink, abortCon
     if (verdict.level === 'safe') return { behavior: 'allow', updatedInput: toolInput };
     const decision = await sink.requestApproval({
       kind: verdict.kind,
-      summary: `${toolName}: ${describeToolInput(toolName, toolInput)}`,
+      summary: humanSummary(verdict.kind, toolName, toolInput),
       reason: verdict.reason,
       detail: { tool: toolName, input: toolInput },
     });
