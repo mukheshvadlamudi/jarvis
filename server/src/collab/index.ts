@@ -26,6 +26,9 @@ export interface HandoffOrigin {
   cwd: string;
 }
 
+/** Longest Claude ⇄ Codex handoff chain from one task, so two agents can't ping-pong away a plan. */
+export const MAX_HANDOFF_CHAIN = 3;
+
 const otherAgent = (a: string): AgentId => (a === 'claude' ? 'codex' : 'claude');
 const label = (a: string) => (a === 'claude' ? 'Claude' : a === 'codex' ? 'Codex' : a);
 
@@ -83,8 +86,20 @@ export class Collaboration {
     return { ok: r.status === 'done', text: r.status === 'done' ? `${label(to)} says:\n${answer}` : answer };
   }
 
+  /** How many handoffs led to this task (0 for a task the owner created). */
+  handoffDepth(task: Task): number {
+    let depth = 0;
+    let t: Task | null = task;
+    while (t?.handoff_json && t.parent_id && depth <= MAX_HANDOFF_CHAIN) {
+      depth++;
+      t = this.s.tasks.get(t.parent_id) ?? null;
+    }
+    return depth;
+  }
+
   /** Create the follow-on task for the other (or a named) agent from a finished run. */
   createHandoff(from: Task, fromRun: Run, spec: HandoffSpec): Task {
+    if (this.handoffDepth(from) >= MAX_HANDOFF_CHAIN) throw new Error(`Handoff limit reached (${MAX_HANDOFF_CHAIN} in a row). Start a new task to go further.`);
     const agent: AgentId = spec.agent === 'other' ? otherAgent(fromRun.agent) : spec.agent;
     const files = all<{ payload_json: string }>(this.s.db, "SELECT payload_json FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?) AND kind = 'file_change'", from.id)
       .map((e) => (JSON.parse(e.payload_json) as { path?: string }).path)
@@ -126,6 +141,7 @@ export class Collaboration {
   request(taskId: string, spec: HandoffSpec): { mode: 'now' | 'after'; task?: Task } {
     const t = this.s.tasks.get(taskId);
     if (!t) throw new Error('not_found');
+    if (this.handoffDepth(t) >= MAX_HANDOFF_CHAIN) throw new Error(`Handoff limit reached (${MAX_HANDOFF_CHAIN} in a row). Start a new task to go further.`);
     const last = get<Run>(this.s.db, "SELECT * FROM runs WHERE task_id = ? AND route_reason NOT LIKE 'consult:%' AND route_reason NOT LIKE 'learning%' ORDER BY started_at DESC LIMIT 1", taskId);
     if (last && last.status !== 'running' && t.status === 'done') return { mode: 'now', task: this.createHandoff(t, last, spec) };
     this.s.tasks.patch(taskId, { then_json: JSON.stringify(spec) });

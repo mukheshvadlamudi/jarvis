@@ -83,6 +83,26 @@ describe('handoffs', () => {
     expect(ctx.s.tasks.get(id)?.then_json).toBeNull();
   });
 
+  it('stops a Claude ⇄ Codex handoff chain after the limit', async () => {
+    ctx = makeCtx({ mockDelayMs: 1 });
+    let id = (await ctx.req('POST', '/api/tasks', { title: 'Tidy the billing module' })).json.task.id;
+    for (let i = 0; i < 3; i++) {
+      await waitFor(() => ctx.s.tasks.get(id)?.status === 'done');
+      const r = await ctx.req('POST', `/api/tasks/${id}/handoff`, { mode: 'continue' });
+      expect(r.json.mode).toBe('now');
+      id = r.json.task.id;
+    }
+    await waitFor(() => ctx.s.tasks.get(id)?.status === 'done');
+    expect(collabOf(ctx.s).handoffDepth(ctx.s.tasks.get(id)!)).toBe(3);
+    const refused = await ctx.req('POST', `/api/tasks/${id}/handoff`, { mode: 'review' });
+    expect(refused.status).toBe(400);
+    expect(refused.json.message).toMatch(/Handoff limit reached/);
+    const runId = fakeRun(id, 'claude');
+    const tool = await call('handoff_to_agent', { mode: 'continue' }, runId, mcpOf(ctx.s).issue(runId, id));
+    expect(tool).toMatchObject({ isError: true });
+    expect(ctx.s.tasks.get(id)?.then_json).toBeNull();
+  });
+
   it('auto review handoff for code tasks when enabled', async () => {
     ctx = makeCtx({ mockDelayMs: 1 });
     ctx.s.config.update({ collaboration: { autoHandoffReview: true } });

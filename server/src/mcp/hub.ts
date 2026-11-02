@@ -1,6 +1,8 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { Services } from '../app.ts';
+import { MAX_HANDOFF_CHAIN } from '../collab/index.ts';
+import type { Collaboration } from '../collab/index.ts';
 import { all, get } from '../db/index.ts';
 import type { MemoryProposals } from '../memory/proposals.ts';
 import type { VaultIndex } from '../memory/vault.ts';
@@ -161,6 +163,8 @@ export class McpHub {
       case 'handoff_to_agent': {
         const t = s.tasks.get(ctx.taskId);
         if (!t) return { text: 'Unknown task.', isError: true };
+        const collab = s.modules.collab as Collaboration | undefined;
+        if (collab && collab.handoffDepth(t) >= MAX_HANDOFF_CHAIN) return { text: `Handoff limit reached (${MAX_HANDOFF_CHAIN} in a row). Finish and summarise your work instead.`, isError: true };
         s.tasks.patch(ctx.taskId, { then_json: JSON.stringify({ agent: 'other', mode: str('mode') === 'continue' ? 'continue' : 'review', instructions: str('instructions') }) });
         return { text: 'Noted: the other agent will pick this up when you finish. Finish your work and summarise it clearly.' };
       }
