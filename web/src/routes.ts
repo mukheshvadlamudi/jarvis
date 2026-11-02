@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { Activity, BookOpen, CalendarClock, CheckCircle2, Gauge, Home, KanbanSquare, PlayCircle, Settings, Sparkles } from 'lucide-react';
+import { Activity, BookOpen, CalendarClock, FlaskConical, FolderGit2, Newspaper, Users, CheckCircle2, Gauge, Home, KanbanSquare, PlayCircle, Settings, Sparkles } from 'lucide-react';
 
 export interface PageProps {
   params: Record<string, string>;
@@ -26,6 +26,10 @@ export const routes: RouteDef[] = [
   { path: '/approvals', title: 'Approvals', icon: CheckCircle2, load: () => import('./pages/Approvals.tsx'), nav: 'main', badge: 'approvals', key: 'a', order: 3 },
   { path: '/runs/:id', title: 'Run', icon: PlayCircle, load: () => import('./pages/Run.tsx') },
   { path: '/tasks/:id', title: 'Task', icon: Activity, load: () => import('./pages/Run.tsx') },
+  { path: '/research', title: 'Research', icon: FlaskConical, load: () => import('./pages/Research.tsx'), nav: 'work', key: 'e', order: 20 },
+  { path: '/updates', title: 'Updates', icon: Newspaper, load: () => import('./pages/Updates.tsx'), nav: 'work', key: 'n', order: 21 },
+  { path: '/projects', title: 'Projects', icon: FolderGit2, load: () => import('./pages/Projects.tsx'), nav: 'work', key: 'p', order: 22 },
+  { path: '/people', title: 'People', icon: Users, load: () => import('./pages/People.tsx'), nav: 'work', key: 'o', order: 23 },
   { path: '/memory', title: 'Memory', icon: BookOpen, load: () => import('./pages/Memory.tsx'), nav: 'knowledge', key: 'm', order: 60 },
   { path: '/skills', title: 'Skills', icon: Sparkles, load: () => import('./pages/Skills.tsx'), nav: 'knowledge', key: 's', order: 61 },
   { path: '/schedules', title: 'Schedules', icon: CalendarClock, load: () => import('./pages/Schedules.tsx'), nav: 'knowledge', key: 'r', order: 62 },

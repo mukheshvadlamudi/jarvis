@@ -258,7 +258,7 @@ export class Orchestrator {
       contextPrefix: opts.resumeSessionId ? '' : ctx.prefix,
       cwd: workdir.cwd,
       resumeSessionId: opts.resumeSessionId,
-      sandbox: task.type === 'research' || task.type === 'admin' || task.type === 'update' ? 'read-only' : 'workspace-write',
+      sandbox: task.type === 'admin' || task.type === 'update' ? 'read-only' : 'workspace-write',
       allowNetwork: task.type !== 'code' || task.outward === 1,
       taskType: task.type,
       vaultPath: this.d.vaultPath,

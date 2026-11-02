@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" xml:lang="en-US">
+  <id>tag:github.com,2008:https://github.com/honojs/hono/releases</id>
+  <link type="text/html" rel="alternate" href="https://github.com/honojs/hono/releases"/>
+  <title>Release notes from hono</title>
+  <updated>2026-10-30T09:12:44Z</updated>
+  <entry>
+    <id>tag:github.com,2008:Repository/12345/v4.13.17</id>
+    <updated>2026-10-30T09:12:44Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/honojs/hono/releases/tag/v4.13.17"/>
+    <title>v4.13.17</title>
+    <content type="html">&lt;h2&gt;What&amp;#39;s Changed&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;fix(streaming): close SSE streams on client abort&lt;/li&gt;&lt;/ul&gt;</content>
+    <author><name>yusukebe</name></author>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/12345/v4.13.16</id>
+    <updated>2026-10-21T16:02:10Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/honojs/hono/releases/tag/v4.13.16"/>
+    <title>v4.13.16</title>
+    <content type="html">&lt;p&gt;Performance improvements for the RegExpRouter.&lt;/p&gt;</content>
+  </entry>
+</feed>

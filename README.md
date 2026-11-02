@@ -1,38 +1,59 @@
 # Jarvis
 
-Personal command centre that runs tasks through the official Claude Code and Codex agents on your existing Claude Pro and ChatGPT Plus plans.
+Personal command centre that runs your work — coding, research, email/admin, updates, routines — through the official **Claude Code** and **Codex** agents on your existing **Claude Pro** and **ChatGPT Plus** plans. No API keys, ever.
 
-See [SPEC.md](SPEC.md) for the design, [docs/DESIGN.md](docs/DESIGN.md) for the UI system and [docs/decisions.md](docs/decisions.md) for choices made while building. Build rules for agents are in [CLAUDE.md](CLAUDE.md).
+See [SPEC.md](SPEC.md) for the design, [docs/DESIGN.md](docs/DESIGN.md) for the UI system and [docs/decisions.md](docs/decisions.md) for choices made while building. Build rules for agents are in [CLAUDE.md](CLAUDE.md). Screenshots of every page (phone and desktop, dark and light) are in [docs/screenshots](docs/screenshots).
 
 ## Requirements
-- Node 24+
+- Node 24+ and git
 - `claude` CLI logged in with your Claude plan (`claude` → `/login`)
 - `codex` CLI logged in with ChatGPT (`codex login`)
-- No API keys: Jarvis removes them from agent environments so usage always comes from your plans.
+- Optional: `gh` CLI (for approval-gated "Open PR"), a Telegram bot
+
+Jarvis removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` and `CODEX_API_KEY` from every agent it starts, so usage always comes from your plans.
 
 ## Run
 ```
 npm install
-cp .env.example .env      # set JARVIS_VAULT to your Obsidian vault
+cp .env.example .env      # set JARVIS_VAULT to your Obsidian vault and JARVIS_RUNNER=real
 npm start                 # builds the UI and serves http://127.0.0.1:4317
 ```
 Development (hot reload): `npm run dev` → API on :4317, UI on http://127.0.0.1:5173.
 
-Try it without touching your plans: set `JARVIS_RUNNER=mock` — scripted runs plus believable demo data.
+Try everything without touching your plans: `JARVIS_RUNNER=mock` gives scripted runs plus believable demo data (a copy of `fixtures/vault`, a demo git repo, feeds, schedules, approvals).
 
-## Check your logins (local only)
-```
-npm run smoke:claude
-npm run smoke:codex
-```
-Each makes one tiny read-only run and prints the events, session id, tokens and plan-usage readings.
+## First run checklist (real logins)
+1. `npm run smoke:claude` and `npm run smoke:codex` — one tiny read-only run each; prints session, tokens and plan-usage readings.
+2. Memory → Health: review the migration proposal for your vault (Jarvis never moves files).
+3. Skills → Preview sync, then Sync now (copies to `~/.claude/skills` and `~/.codex/skills`; only skills Jarvis created are ever touched).
+4. Projects → add your repos (local path) so coding tasks run in `.jarvis-worktrees/<task>`.
+5. Schedules → turn on the Morning brief when you're happy.
+6. Optional: Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`, `JARVIS_PUBLIC_URL`).
+7. Optional remote access (phone over Tailscale): set both `JARVIS_BIND` and `JARVIS_ACCESS_TOKEN`.
+
+## What's inside
+| Page | What it does |
+|---|---|
+| Home | Command bar (dictation, live type/project/agent preview), Needs you, Running now, plan usage, today's routines, follow-ups |
+| Board | Inbox → Queued → Running → Needs you → Done; drag or `[`/`]`; run with Claude or Codex |
+| Run view | Live transcript, tool calls, file changes, context inspector, tokens; Stop / follow-up / run again |
+| Approvals | Everything outward-facing waits here (and in Telegram) |
+| Research | Reports saved to `Research/` with sources; follow-ups continue the same session |
+| Updates | RSS/Atom/GitHub releases and page-change feeds; daily digest |
+| Projects | Repos, CLAUDE.md/AGENTS.md, Jarvis worktrees with diff stats, approval-gated PRs, clean-up |
+| People | Follow-ups and open threads from `People/*.md` |
+| Memory | Vault search and reader, memory proposals with diffs, size caps, migration proposal |
+| Skills | Vault skills, sync to Claude/Codex, agent-proposed skills |
+| Schedules | Cron schedules and built-in routines with missed-run catch-up |
+| Usage | Plan windows, per-day/per-type tokens, routing decisions |
+| Settings | Routing rules, concurrency, budgets, Telegram, theme |
 
 ## Tests
 ```
-npm test            # server + web, always with JARVIS_RUNNER=mock
+npm test            # server + web, always with JARVIS_RUNNER=mock (no real agent calls)
 npm run typecheck
-node web/scripts/screenshots.mjs   # UI quality gate (needs `npm run build` first)
+npm run build && node web/scripts/screenshots.mjs   # UI quality gate
 ```
 
 ## Keyboard
-`Ctrl/⌘ K` palette · `c` new task · `/` search · `g h|b|a|u` go to Home/Board/Approvals/Usage · `j`/`k` move · `[`/`]` move a board card · `Esc` close.
+`Ctrl/⌘ K` palette · `c` new task · `/` search · `g` then `h b a e n p o m s r u ,` to jump · `j`/`k` move · `[`/`]` move a board card · `Esc` close.

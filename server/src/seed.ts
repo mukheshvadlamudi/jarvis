@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Services } from './app.ts';
 import { get, run, tx } from './db/index.ts';
 import type { ContextReport } from './tasks/context.ts';
@@ -252,6 +255,7 @@ export function seedIfEmpty(s: Services, now = Date.now()): boolean {
   });
   seedMemory(s, now);
   seedSchedules(s, now);
+  seedWorkspaces(s, now);
   s.bus.publish('seeded', {});
   return true;
 }
@@ -299,5 +303,68 @@ function seedSchedules(s: Services, now: number): void {
   add(ids.morning_brief, 26 * H, 'missed', 'Summarise unread email', 'Ran on wake (missed while asleep)');
   add(ids.morning_brief, 74 * H, 'skipped', null, 'Missed by 14 h (over 12 h) — skipped');
   // Mark the weekly and monthly ones as recently run so boot catch-up doesn't log stale skips.
-  run(s.db, "UPDATE schedules SET last_run_at = ? WHERE id = ? OR id = ?", iso(now - 60_000), ids.weekly_review, custom);
+  run(s.db, "UPDATE schedules SET last_run_at = ? WHERE id IN (?, ?, ?)", iso(now - 60_000), ids.weekly_review, ids.updates_digest, custom);
+}
+
+/** Feeds with items, and (mock mode) a small real git repo so Projects shows actual worktrees. */
+function seedWorkspaces(s: Services, now: number): void {
+  const has = get<{ n: number }>(s.db, "SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'feed_sources'")?.n;
+  if (!has) return;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const sources: Array<[string, string, string, Array<[string, string, string, number, boolean]>]> = [
+    ['Node.js Blog', 'https://nodejs.org/en/feed/blog.xml', 'rss', [
+      ['Node.js 24.11.1 (LTS) — security release', 'https://nodejs.org/en/blog/release/v24.11.1', 'Fixes two medium-severity issues in http and the permission model. Upgrade recommended.', 5 * D, false],
+      ['Node.js 25.2.0 (Current)', 'https://nodejs.org/en/blog/release/v25.2.0', 'New --watch-preserve-output flag, faster require(esm), and SQLite updates.', 11 * D, true],
+    ]],
+    ['hono releases', 'https://github.com/honojs/hono/releases.atom', 'github', [
+      ['v4.13.17', 'https://github.com/honojs/hono/releases/tag/v4.13.17', "What's Changed — fix(streaming): close SSE streams on client abort.", 3 * D, false],
+      ['v4.13.16', 'https://github.com/honojs/hono/releases/tag/v4.13.16', 'Performance improvements for the RegExpRouter.', 12 * D, true],
+    ]],
+    ['vite releases', 'https://github.com/vitejs/vite/releases.atom', 'github', [
+      ['v8.3.5', 'https://github.com/vitejs/vite/releases/tag/v8.3.5', 'Fix CSS url() rewriting for aliased font paths; dev server now respects server.host for HMR.', 1.5 * D, false],
+      ['create-vite@8.3.0', 'https://github.com/vitejs/vite/releases/tag/create-vite%408.3.0', 'React and Vue templates updated to the latest majors.', 6 * D, true],
+    ]],
+    ['Claude Code changelog', 'https://github.com/anthropics/claude-code/releases.atom', 'github', [
+      ['v2.3.4', 'https://github.com/anthropics/claude-code/releases/tag/v2.3.4', 'Agent SDK: rate_limit_event now includes utilization for subscription plans; faster MCP startup.', 0.6 * D, false],
+    ]],
+    ['Hetzner Status', 'https://status.hetzner.com', 'page', [
+      ['Hetzner Status changed', 'https://status.hetzner.com', 'Scheduled maintenance: fsn1 network, 6 Nov 02:00–04:00 UTC. Short packet loss possible.', 0.3 * D, false],
+    ]],
+  ];
+  for (const [name, url, kind, items] of sources) {
+    const id = newId('f');
+    run(s.db, 'INSERT INTO feed_sources (id, name, url, kind, enabled, last_checked_at, created_at) VALUES (?, ?, ?, ?, 1, ?, ?)', id, name, url, kind, iso(now - 2 * H), iso(now - 30 * D));
+    for (const [title, link, summary, ago, seen] of items) {
+      run(s.db, 'INSERT INTO feed_items (id, source_id, guid, title, url, published_at, summary, seen, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', newId('fi'), id, link, title, link, iso(now - ago), summary, seen ? 1 : 0, iso(now - ago + H));
+    }
+  }
+
+  // Link the seeded analytics research task to its report.
+  run(s.db, "UPDATE tasks SET output_path = 'Research/2026-11-01-privacy-analytics.md' WHERE title LIKE 'Compare Plausible%'");
+
+  if (s.env.runner !== 'mock') return;
+  try {
+    const repo = join(s.env.dataDir, 'demo-repos', 'clienteasy');
+    mkdirSync(join(repo, 'src', 'auth'), { recursive: true });
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=Mukhesh', '-c', 'user.email=owner@example.com', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'pipe' });
+    git(repo, 'init', '-q');
+    writeFileSync(join(repo, 'CLAUDE.md'), '# ClientEasy — agent rules\n\n- TypeScript strict; run `npm test` before committing.\n- Database migrations are additive only.\n- Add a CHANGELOG line under Unreleased for every PR.\n');
+    writeFileSync(join(repo, 'AGENTS.md'), 'Same rules as CLAUDE.md.\n');
+    writeFileSync(join(repo, 'src', 'auth', 'session.ts'), 'export async function refresh(userId: string) {\n  const refreshToken = await store.get(userId);\n  if (!refreshToken) return null;\n  return rotate(refreshToken);\n}\n');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-qm', 'ClientEasy 2.4');
+    const task = get<{ id: string }>(s.db, "SELECT id FROM tasks WHERE title = 'Fix the token refresh race in the auth middleware'");
+    if (task) {
+      const wt = join(repo, '.jarvis-worktrees', task.id);
+      git(repo, 'worktree', 'add', '-q', '-b', `jarvis/${task.id}-fix-the-token-refresh-race`, wt);
+      writeFileSync(join(wt, 'src', 'auth', 'session.ts'), 'import { withUserLock } from "./lock";\n\nexport async function refresh(userId: string) {\n  return withUserLock(userId, async () => {\n    const refreshToken = await store.get(userId);\n    if (!refreshToken) return null;\n    return rotate(refreshToken);\n  });\n}\n');
+      writeFileSync(join(wt, 'src', 'auth', 'lock.ts'), 'const locks = new Map<string, Promise<unknown>>();\n\nexport async function withUserLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {\n  const prev = locks.get(userId) ?? Promise.resolve();\n  const next = prev.then(fn, fn);\n  locks.set(userId, next.catch(() => undefined));\n  return next;\n}\n');
+      git(wt, 'add', '.');
+      git(wt, 'commit', '-qm', 'Serialise token refresh per user');
+      run(s.db, 'UPDATE runs SET cwd = ? WHERE task_id = ?', wt, task.id);
+    }
+    run(s.db, "UPDATE projects SET path = ? WHERE name = 'ClientEasy'", repo);
+  } catch {
+    // git missing: Projects simply shows no local folder
+  }
 }

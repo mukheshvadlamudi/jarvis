@@ -37,3 +37,13 @@ Ambiguities in SPEC.md resolved with the simplest option that keeps the constrai
 25. **“Describe in words”** tries local rules first (weekdays/weekends/named days/daily/every N hours/monthly) and only then makes one small read-only Codex call — only when the owner presses Convert. The result is always validated with croner before use.
 26. **Timezone** is the system timezone (croner default); shown on the Schedules page.
 27. **Home “Follow-ups”** shows anything with `follow_up` due within 7 days (overdue highlighted); the morning brief lists only those due today or earlier.
+
+## Phase 3 — Workspaces & Telegram
+
+28. **Research runs `workspace-write` in their scratch folder** (changes decision 4) so the agent can write `report.md`; live web search and network are on. The report is saved to `Research/YYYY-MM-DD-<slug>.md` with frontmatter (`type, updated, task, agent, project`) and a guaranteed `## Sources` section. Follow-ups resume the same session and rewrite the same note (`task.output_path`).
+29. **Feeds** use a tolerant regex reader for RSS 2.0 and Atom (incl. GitHub `releases.atom`) — no XML dependency. Other URLs are "pages": the visible text is hashed and a change creates one item. Fetching is plain HTTP every `feeds.fetchEveryHours`; mock mode never fetches automatically (set `JARVIS_FEEDS_FETCH=1`). Items are marked seen when an Updates-digest run finishes.
+30. **Open PR is approval-gated as a Jarvis action**, not an agent action: approving runs `git push -u origin <branch>` and `gh pr create --head <branch> --fill` in the worktree, stores the PR URL on the task and notifies. Rejecting does nothing. Approval handlers are registered per action (`approvals.actions`) so they don't resume an agent session.
+31. **Worktree clean-up** removes only the worktree folder and keeps the branch; refuses while the task runs; dirty worktrees need an explicit "remove anyway".
+32. **People** are read from `People/*.md` frontmatter (`company, role, email, last_contact, follow_up, tags`) plus an "Open threads" list in the body. "Contacted today", "Snooze a week" and the date picker rewrite only those frontmatter lines (owner action → applied immediately, previous version backed up).
+33. **Telegram** uses plain `fetch` long polling (`getUpdates`, 50 s) and answers only `TELEGRAM_ALLOWED_CHAT_ID`. Links in messages use `JARVIS_PUBLIC_URL` (e.g. your Tailscale URL) or fall back to localhost. The morning brief is sent in full; other finished tasks as a short summary. Settings → `telegram.enabled` turns it on/off without a restart.
+34. **Mock-mode demo repo:** seeding creates `data/demo-repos/clienteasy` (a real git repo with a Jarvis worktree and commit) so the Projects page shows real worktree/diff data.

@@ -21,6 +21,8 @@ export class ApprovalService {
   private waiters = new Map<string, Waiter>();
   /** Called when an approval with no live waiter is decided (orchestrator resumes the task). */
   onOrphanDecision: ((approval: Approval, decision: Decision, note: string | null) => void) | null = null;
+  /** Handlers for approvals that gate a Jarvis action (detail.action), e.g. opening a PR. */
+  readonly actions = new Map<string, (approval: Approval, decision: Decision, note: string | null) => void | Promise<void>>();
 
   constructor(db: Db, bus: EventBus) {
     this.db = db;
@@ -96,7 +98,15 @@ export class ApprovalService {
       this.waiters.delete(id);
       waiter.resolve({ approved: decision === 'approved', note: note ?? undefined, status: decision });
     } else {
-      this.onOrphanDecision?.(updated, decision, note);
+      let action: string | undefined;
+      try {
+        action = (JSON.parse(updated.detail_json) as { action?: string }).action;
+      } catch {
+        action = undefined;
+      }
+      const handler = action ? this.actions.get(action) : undefined;
+      if (handler) void Promise.resolve(handler(updated, decision, note)).catch(() => undefined);
+      else this.onOrphanDecision?.(updated, decision, note);
     }
     return updated;
   }

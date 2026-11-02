@@ -210,6 +210,18 @@ export default function Settings() {
 
           <section className="panel">
             <div className="panel-head">
+              <h2>Notifications and feeds</h2>
+            </div>
+            <Row label="Telegram bot" hint={env.telegramConfigured ? 'Approvals with buttons, finished tasks, the morning brief. Text it to create tasks.' : 'Set TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_CHAT_ID in .env, then restart.'}>
+              <Switch label="Telegram bot" checked={cfg.telegram.enabled} disabled={!env.telegramConfigured} onChange={(v) => set((c) => void (c.telegram.enabled = v))} />
+            </Row>
+            <Row label="Check feeds every" hint="Plain HTTP fetches — no agent, no plan usage.">
+              <NumberInput label="Feed interval hours" value={cfg.feeds.fetchEveryHours} min={1} max={72} suffix="hours" width={72} onChange={(n) => set((c) => void (c.feeds.fetchEveryHours = n))} />
+            </Row>
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
               <h2>Appearance</h2>
             </div>
             <Row label="Theme">

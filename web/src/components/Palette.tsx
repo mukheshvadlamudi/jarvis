@@ -1,4 +1,4 @@
-import { CornerDownLeft, FileText, ListTodo, Moon, Play, Plus, Search } from 'lucide-react';
+import { CalendarClock, CornerDownLeft, FileText, ListTodo, Moon, Play, Plus, Search } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, post } from '../lib/api.ts';
@@ -34,6 +34,23 @@ export const paletteSources: Array<(q: string, signal: AbortSignal) => Promise<P
     }
   },
 ];
+
+paletteSources.push(async (q, signal) => {
+  if (q.length < 2) return [];
+  const r = await api<{ schedules: Array<{ id: string; name: string }> }>('/api/schedules', { signal });
+  return r.schedules
+    .filter((x) => x.name.toLowerCase().includes(q.toLowerCase()))
+    .map((x) => ({
+      id: `sched:${x.id}`,
+      group: 'Schedules',
+      label: `Run “${x.name}” now`,
+      icon: CalendarClock,
+      run: () =>
+        void post<{ task: Task }>(`/api/schedules/${x.id}/run-now`)
+          .then((res) => toast(`Queued “${res.task.title}”`, { kind: 'success', action: { label: 'Open', run: () => navigate(`/tasks/${res.task.id}`) } }))
+          .catch(toastError),
+    }));
+});
 
 /** Static commands. Modules append here. */
 export const paletteCommands: PaletteItem[] = [];
