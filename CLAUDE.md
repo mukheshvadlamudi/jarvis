@@ -14,6 +14,10 @@ Read `SPEC.md` first. It is the source of truth for what to build; this file is 
 - Keep the server light: no polling loops faster than needed, stream large logs instead of buffering, cap stored event payloads (truncate tool output > 20 KB, keep a note that it was truncated).
 - UI must work at 375 px width with no horizontal scroll, and in light and dark mode.
 
+## Design
+- Follow `docs/DESIGN.md` exactly. Premium, calm, dense — no AI-template look. Every UI PR attaches screenshots (375 and 1440 px, dark and light).
+- Finished means finished: no placeholder pages, no "coming soon", no TODO stubs except what genuinely needs the owner's real logins (list those in the PR).
+
 ## Workflow
 - Stay inside the modules your phase owns (SPEC §3 "Module ownership"). Register routes in `server/src/api/register.ts` and pages in `web/src/routes.ts` with one line each, to keep parallel branches mergeable.
 - Small commits with clear messages. Work on a branch and open a PR describing what was built, what was tested, and anything stubbed.
