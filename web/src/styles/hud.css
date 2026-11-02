@@ -657,3 +657,16 @@ body {
   flex-wrap: wrap;
   width: 100%;
 }
+@media (max-width: 767px) {
+  .out-foot > span:last-child {
+    width: 100%;
+  }
+  .out-foot input {
+    flex: 1;
+    min-width: 0;
+  }
+  .out-foot a.btn {
+    flex: 1;
+    justify-content: center;
+  }
+}

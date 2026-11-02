@@ -95,6 +95,14 @@ function stepsFor(input: RunInput, scenario: MockScenario | 'learn' | 'cron' | '
       steps.push({ do: 'tool', tool: 'Grep', input: { pattern: 'refreshToken', path: 'src' }, output: 'src/auth/session.ts:42:  const refreshToken = await store.get(userId);\nsrc/auth/session.ts:88:  if (!refreshToken) return null;' });
       steps.push({ do: 'tool', tool: 'Read', input: { file_path: 'src/auth/session.ts' }, output: '/* 140 lines */' });
       steps.push(msg('The refresh path reads the token before the previous write has settled. Adding a per-user lock.'));
+      {
+        // Demo of a mid-task consult (the real flow goes through the consult_agent MCP tool).
+        const from = input.agent ?? 'claude';
+        const to = from === 'claude' ? 'codex' : 'claude';
+        const question = 'Is a per-user lock around the refresh enough, or do we also need a token version check?';
+        steps.push({ do: 'emit', event: { kind: 'status', payload: { status: 'consult', phase: 'asked', from, to, question } } });
+        steps.push({ do: 'emit', event: { kind: 'status', payload: { status: 'consult', phase: 'answered', from, to, question, answer: 'The lock is enough for a single instance. Release it in a finally block so a thrown rotate() cannot wedge the user, and add a test for two concurrent refreshes.' } } });
+      }
       steps.push({ do: 'tool', tool: 'Edit', input: { file_path: 'src/auth/session.ts', old_string: 'const refreshToken', new_string: 'const refreshToken = await withLock(userId, () =>' }, output: 'Applied edit to src/auth/session.ts' });
       steps.push({ do: 'emit', event: { kind: 'file_change', payload: { path: 'src/auth/session.ts', kind: 'update', additions: 18, deletions: 4 } } });
       steps.push({ do: 'emit', event: { kind: 'file_change', payload: { path: 'test/session.test.ts', kind: 'update', additions: 31, deletions: 0 } } });

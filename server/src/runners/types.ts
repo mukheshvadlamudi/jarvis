@@ -9,6 +9,8 @@ export interface McpServerSpec {
 
 export interface RunInput {
   taskId: string;
+  /** Which agent this run is for (informational; the registry already picked the runner). */
+  agent?: AgentId;
   runId: string;
   prompt: string;
   contextPrefix: string;

@@ -255,6 +255,7 @@ export class Orchestrator {
     const sink = this.makeSink(task.id, runId, agent);
     const input: RunInput = {
       taskId: task.id,
+      agent,
       runId,
       prompt: opts.prompt,
       contextPrefix: opts.resumeSessionId ? '' : ctx.prefix,

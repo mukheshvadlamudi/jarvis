@@ -166,7 +166,7 @@ class VoiceEngine {
     this.stt!.postMessage({ type: 'load', model: this.state.prefs.sttModel });
   }
 
-  /** Free the models (Kokoro ~600 MB, Whisper ~150–450 MB) whenever voice is off. */
+  /** Free the models (Kokoro ~600 MB, Whisper ~200–600 MB) whenever voice is off. */
   private release() {
     this.tts?.terminate();
     this.stt?.terminate();

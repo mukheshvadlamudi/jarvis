@@ -52,7 +52,7 @@ try {
     { name: 'approvals', path: '/approvals' },
     { name: 'usage', path: '/usage' },
     { name: 'settings', path: '/settings' },
-    ...(await import(join(root, 'web/scripts/pages.mjs')).then((m) => m.pages(json)).catch(() => [])),
+    ...(await import(join(root, 'web/scripts/pages.mjs')).then((m) => m.pages(json, base)).catch(() => [])),
     ...extra,
   ];
   if (only) pages = pages.filter((p) => only.includes(p.path) || only.includes(p.name));
@@ -80,7 +80,7 @@ try {
         }
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         const file = join(outDir, `${p.name}-${vp.tag}-${theme}.png`);
-        await page.screenshot({ path: file, fullPage: true });
+        await page.screenshot({ path: file, fullPage: !p.click }); // fixed sheets render wrongly in stitched full-page captures
         if (errors.length) failures.push(`${p.name} ${vp.tag} ${theme}: console errors: ${errors.join(' | ')}`);
         if (vp.mobile && overflow > 0) failures.push(`${p.name} ${vp.tag} ${theme}: horizontal scroll ${overflow}px`);
         await page.close();

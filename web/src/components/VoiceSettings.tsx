@@ -85,7 +85,7 @@ export function VoiceSettings() {
       <Line label="Wake word" hint="On: only speech starting with “Jarvis” counts (right after Jarvis speaks you can reply without it). Off: everything you say is a command.">
         <Switch label="Wake word" checked={p.wakeWord} onChange={(wakeWord) => voice.setPrefs({ wakeWord })} />
       </Line>
-      <Line label="Speech recognition" hint="Whisper, on this device. RAM while on: Tiny ~150 MB, Base ~300 MB, Small ~600 MB. Base is the best balance.">
+      <Line label="Speech recognition" hint="Whisper, on this device. RAM while on: Tiny ~200 MB, Base ~300 MB, Small ~600 MB. Base is the best balance of speed and accuracy.">
         <Segmented<VoicePrefs['sttModel']>
           label="Speech model"
           value={p.sttModel}

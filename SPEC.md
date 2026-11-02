@@ -16,7 +16,7 @@ Single user. Runs on a Windows 11 laptop with **8 GB RAM** (≈0.5–2 GB free i
 4. **Localhost by default.** Server binds `127.0.0.1`. Remote access (phone over Tailscale) only when `JARVIS_BIND` is changed **and** `JARVIS_ACCESS_TOKEN` is set; every request then needs the token.
 5. **Nothing outward-facing without approval.** Sending email/messages, posting, pushing to a remote, opening PRs, deleting files outside a task worktree, purchases → always paused for owner approval.
 6. **Secrets never in the repo or the vault.** `.env` is git-ignored. Credentials stay in the CLIs' own stores and connectors.
-7. **Text and speech-to-text input only.** No text-to-speech, no voice output. Dictation = the browser's Web Speech API mic button in the input box, and the phone keyboard's mic in Telegram.
+7. **Voice runs on the device, never on paid APIs.** (Changed by the owner: voice output is now allowed.) Hands-free voice uses Kokoro-82M for speech, Whisper for recognition and Silero VAD for turn-taking, all in the browser/desktop app — no ElevenLabs/Sarvam/cloud TTS, no credits. The mic button in inputs (Web Speech API) and the phone keyboard's mic in Telegram still work for dictation.
 
 ## 2. Stack
 
@@ -272,4 +272,4 @@ Mobile-first; bottom nav on phone, sidebar on desktop. Every text input has a mi
 **Phase 4 — Later (not now):** run on a small VPS, desktop computer-use tasks.
 
 ## 19. Non-goals
-Own LLM hosting, vector DB, voice output, multi-user, agent swarms, replacing the Claude Code / Codex chat UIs for interactive coding.
+Own LLM hosting, vector DB, cloud/paid voice services, multi-user, agent swarms, replacing the Claude Code / Codex chat UIs for interactive coding.
