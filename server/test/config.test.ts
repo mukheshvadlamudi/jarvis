@@ -1,6 +1,6 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ConfigStore, DEFAULT_CONFIG, loadEnv, mergeKnown } from '../src/config.ts';
 import { sanitizedAgentEnv } from '../src/util/env.ts';
@@ -15,7 +15,7 @@ describe('config', () => {
     expect(store.get().maxConcurrentRuns).toBe(1);
     expect(store.get().router.defaults.code).toBe('claude');
     expect(mergeKnown(DEFAULT_CONFIG, { router: { defaults: { code: 7 } } }).router.defaults.code).toBe('claude');
-    expect(new ConfigStore(store.file.replace('/config.json', '')).get().router.fallbackAtPercent).toBe(80);
+    expect(new ConfigStore(dirname(store.file)).get().router.fallbackAtPercent).toBe(80);
   });
 
   it('binds localhost unless an access token is set', () => {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { join } from 'node:path';
 import { layout, loginTerminalCommand, parseEnvFile, parseSse, serverEnv } from '../lib.mjs';
 
 test('parses .env files', () => {
@@ -15,13 +16,13 @@ test('server env strips API keys and runs Electron as Node', () => {
 });
 
 test('layout differs for packaged and dev', () => {
-  const dev = layout({ isPackaged: false, resourcesPath: '/r', appDir: '/repo/desktop', userData: '/u' });
-  assert.equal(dev.root, '/repo');
-  assert.equal(dev.dataDir, '/repo/data');
+  const dev = layout({ isPackaged: false, resourcesPath: '/r', appDir: join('/repo', 'desktop'), userData: '/u' });
+  assert.equal(dev.root, join('/repo'));
+  assert.equal(dev.dataDir, join('/repo', 'data'));
   const pkg = layout({ isPackaged: true, resourcesPath: '/r', appDir: '/x', userData: '/u' });
-  assert.equal(pkg.serverEntry, '/r/jarvis/server/src/index.ts');
-  assert.equal(pkg.dataDir, '/u/data');
-  assert.equal(pkg.envFile, '/u/.env');
+  assert.equal(pkg.serverEntry, join('/r', 'jarvis', 'server', 'src', 'index.ts'));
+  assert.equal(pkg.dataDir, join('/u', 'data'));
+  assert.equal(pkg.envFile, join('/u', '.env'));
 });
 
 test('login terminal commands per platform', () => {

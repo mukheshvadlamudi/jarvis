@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { Services } from '../app.ts';
 import { all, get } from '../db/index.ts';
@@ -51,6 +51,17 @@ export function parseWorktrees(porcelain: string): Array<{ path: string; branch:
   return out;
 }
 
+/** Canonical path for comparisons: resolves symlinks (macOS /var → /private/var) and case on Windows. */
+function canon(p: string): string {
+  let r = resolve(p);
+  try {
+    r = realpathSync.native(r);
+  } catch {
+    // path may not exist (yet)
+  }
+  return process.platform === 'win32' ? r.toLowerCase() : r;
+}
+
 /** Code projects (SPEC §12): repo registry, agent-instruction files, Jarvis worktrees, approval-gated PRs. */
 export class Projects {
   private s: Services;
@@ -86,11 +97,12 @@ export class Projects {
     base.remote = await this.git(root, ['remote', 'get-url', 'origin']);
     base.branch = await this.git(root, ['symbolic-ref', '--short', 'HEAD']);
     const list = await this.git(root, ['worktree', 'list', '--porcelain']);
-    const jarvisDir = join(root, '.jarvis-worktrees');
+    const jarvisDir = canon(join(root, '.jarvis-worktrees'));
     for (const wt of parseWorktrees(list ?? '')) {
       const abs = resolve(wt.path);
-      if (!abs.startsWith(jarvisDir)) continue;
-      const taskId = abs.slice(jarvisDir.length + 1).split(/[\\/]/)[0];
+      const c = canon(abs);
+      if (!c.startsWith(jarvisDir + sep) && !c.startsWith(jarvisDir + '/')) continue;
+      const taskId = c.slice(jarvisDir.length + 1).split(/[\\/]/)[0];
       const task = get<Task>(this.s.db, 'SELECT id, title, status, output_path FROM tasks WHERE id = ?', taskId) ?? null;
       const stat = wt.branch && base.branch ? await this.git(root, ['diff', '--shortstat', `${base.branch}...${wt.branch}`]) : null;
       const dirty = ((await this.git(abs, ['status', '--porcelain'])) ?? '').split('\n').filter(Boolean).length;
