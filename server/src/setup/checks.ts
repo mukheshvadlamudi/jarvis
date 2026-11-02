@@ -10,6 +10,12 @@ import { presentBillingKeys } from '../util/env.ts';
 
 const exec = promisify(execFile);
 
+/** The login command, runnable from any folder (npm needs the Jarvis folder to find its scripts). */
+export function loginCommand(agent: 'claude' | 'codex'): string {
+  const cd = process.platform === 'win32' ? `cd /d "${REPO_ROOT}"` : `cd "${REPO_ROOT}"`;
+  return `${cd} && npm run login:${agent}`;
+}
+
 export type CheckState = 'ok' | 'todo' | 'warn' | 'optional';
 
 export interface Check {
@@ -84,7 +90,7 @@ export async function runChecks(s: Services): Promise<Check[]> {
       : claudeLogin
         ? 'A saved login was found. Verify it with one tiny run.'
         : 'Log in once with your Claude plan. Jarvis ships the Claude Code CLI — no global install needed.',
-    fix: claudeVerified ? undefined : ['npm run login:claude', '(then type /login, finish in the browser, and /exit)'],
+    fix: claudeVerified ? undefined : [loginCommand('claude'), '(then type /login, finish in the browser, and /exit)'],
     action: 'verify-claude',
   });
 
@@ -95,7 +101,7 @@ export async function runChecks(s: Services): Promise<Check[]> {
     id: 'codex', title: 'Codex login (ChatGPT Plus/Pro)', required: true,
     state: codexVerified ? 'ok' : codexLogin ? 'warn' : 'todo',
     detail: codexVerified ? `Verified ${new Date(codexVerified).toLocaleDateString()} with a tiny run.` : codexLogin ? 'A saved login was found. Verify it with one tiny run.' : 'Sign in with ChatGPT once. Jarvis ships the Codex CLI.',
-    fix: codexVerified ? undefined : ['npm run login:codex'],
+    fix: codexVerified ? undefined : [loginCommand('codex')],
     action: 'verify-codex',
   });
 

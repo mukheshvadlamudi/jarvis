@@ -7,7 +7,7 @@ import { all, getSetting, run, setSetting } from '../db/index.ts';
 import { createClaudeRunner } from '../runners/claude.ts';
 import { createCodexRunner } from '../runners/codex.ts';
 import type { RunEventSink } from '../runners/types.ts';
-import { readLocalEnv, runChecks, scanRepos, suggestCodeRoots, suggestVaults, validateVault, writeLocalEnv } from '../setup/checks.ts';
+import { loginCommand, readLocalEnv, runChecks, scanRepos, suggestCodeRoots, suggestVaults, validateVault, writeLocalEnv } from '../setup/checks.ts';
 import { newId, nowIso } from '../util/ids.ts';
 import { bad, body } from './core.ts';
 
@@ -100,7 +100,7 @@ export function registerSetupRoutes(app: Hono, s: Services): void {
     clearTimeout(timer);
     rmSync(cwd, { recursive: true, force: true });
     if (r.status !== 'done') {
-      return c.json({ ok: false, message: r.error ?? events[0] ?? 'The agent did not answer. Log in again and retry.', hint: agent === 'claude' ? 'npm run login:claude' : 'npm run login:codex' }, 400);
+      return c.json({ ok: false, message: r.error ?? events[0] ?? 'The agent did not answer. Log in again and retry.', hint: loginCommand(agent === 'claude' ? 'claude' : 'codex') }, 400);
     }
     setSetting(s.db, `setup.verified.${agent}`, nowIso());
     return c.json({ ok: true, reply: r.summary.slice(0, 200), tokens: r.usage.inputTokens + r.usage.outputTokens });
