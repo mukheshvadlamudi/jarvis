@@ -22,6 +22,10 @@ export interface CreateTaskInput {
   outward?: boolean;
   /** Queue immediately (default) or park in the inbox. */
   run?: boolean;
+  /** Hand off to another agent when this task finishes. */
+  then?: unknown;
+  /** Set on tasks created by a handoff. */
+  handoff?: unknown;
 }
 
 export interface TaskFilter {
@@ -33,7 +37,7 @@ export interface TaskFilter {
   limit?: number;
 }
 
-const PATCHABLE = ['title', 'body', 'type', 'priority', 'project_id', 'agent_pref', 'effort', 'due_at', 'result_summary', 'output_path', 'outward'] as const;
+const PATCHABLE = ['title', 'body', 'type', 'priority', 'project_id', 'agent_pref', 'effort', 'due_at', 'result_summary', 'output_path', 'outward', 'then_json'] as const;
 
 export class TaskService {
   private db: Db;
@@ -78,6 +82,8 @@ export class TaskService {
       outward: (input.outward ?? c.outward) ? 1 : 0,
       route_reason: null,
       not_before: null,
+      then_json: input.then ? JSON.stringify(input.then) : null,
+      handoff_json: input.handoff ? JSON.stringify(input.handoff) : null,
     };
     run(
       this.db,
@@ -87,6 +93,7 @@ export class TaskService {
       t.id, t.title, t.body, t.type, t.status, t.priority, t.project_id, t.agent_pref, t.agent, t.effort, t.parent_id, t.schedule_id,
       t.created_at, t.updated_at, t.due_at, t.result_summary, t.output_path, t.outward, t.route_reason, t.not_before,
     );
+    if (t.then_json || t.handoff_json) run(this.db, 'UPDATE tasks SET then_json = ?, handoff_json = ? WHERE id = ?', t.then_json, t.handoff_json, t.id);
     this.bus.publish('task.created', t);
     return t;
   }

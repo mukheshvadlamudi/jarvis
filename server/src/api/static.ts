@@ -1,10 +1,14 @@
 import type { Handler } from 'hono';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import { Readable } from 'node:stream';
 import { extname, join, normalize, resolve } from 'node:path';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.onnx': 'application/octet-stream',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json',
   '.webmanifest': 'application/manifest+json',
@@ -14,6 +18,9 @@ const TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
 };
+
+/** COOP + COEP (credentialless, so model downloads from Hugging Face still work). */
+export const ISOLATION = { 'cross-origin-opener-policy': 'same-origin', 'cross-origin-embedder-policy': 'credentialless' };
 
 /** Serve the built web app with an SPA fallback to index.html. */
 export function staticWeb(root: string): Handler {
@@ -31,9 +38,14 @@ export function staticWeb(root: string): Handler {
     if (!file.startsWith(base) || !existsSync(file) || statSync(file).isDirectory()) file = join(base, 'index.html');
     const type = TYPES[extname(file)] ?? 'application/octet-stream';
     const immutable = file.includes(`${join(base, 'assets')}`);
-    return c.body(readFileSync(file), 200, {
+    const headers: Record<string, string> = {
       'content-type': type,
+      'content-length': String(statSync(file).size),
       'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
-    });
+    };
+    // Cross-origin isolation lets the on-device voice models use multi-threaded WASM (3–4× faster).
+    // (workers need it on their own script response too, so it goes on every static file).
+    Object.assign(headers, ISOLATION);
+    return new Response(Readable.toWeb(createReadStream(file)) as ReadableStream, { headers });
   };
 }

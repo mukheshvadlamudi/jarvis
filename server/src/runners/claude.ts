@@ -121,6 +121,8 @@ export function buildClaudeOptions(input: RunInput, sink: RunEventSink, abortCon
     systemPrompt: { type: 'preset', preset: 'claude_code', append: input.contextPrefix },
     additionalDirectories: input.additionalDirectories,
     env: sanitizedAgentEnv(env, { CLAUDE_AGENT_SDK_CLIENT_APP: 'jarvis/0.1' }),
+    ...(input.effort ? { effort: input.effort as NonNullable<Options['effort']> } : {}),
+    ...(input.model ? { model: input.model } : {}),
   };
 }
 

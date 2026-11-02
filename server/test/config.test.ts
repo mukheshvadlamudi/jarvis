@@ -42,3 +42,12 @@ describe('payload caps', () => {
     expect(capPayload({ output: big, n: 1 })).toMatchObject({ truncated: true, n: 1 });
   });
 });
+
+describe('agent harness settings', () => {
+  it('validates effort levels per agent', () => {
+    const store = new ConfigStore(mkdtempSync(join(tmpdir(), 'jcfg-')));
+    expect(store.update({ agents: { codex: { effort: { high: 'max' } } } })).toMatchObject({ ok: false });
+    expect(store.update({ agents: { claude: { effort: { high: 'max' }, model: 'claude-opus-5-5' } } }).ok).toBe(true);
+    expect(store.get().agents.claude.effort.high).toBe('max');
+  });
+});

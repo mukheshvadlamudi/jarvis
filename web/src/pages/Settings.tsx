@@ -8,6 +8,7 @@ import { useApi } from '../lib/hooks.ts';
 import { setTheme, useTheme } from '../lib/theme.ts';
 import type { ThemePref } from '../lib/theme.ts';
 import { toast } from '../lib/toast.ts';
+import { VoiceSettings } from '../components/VoiceSettings.tsx';
 
 type Agent = 'claude' | 'codex';
 interface Config {
@@ -20,6 +21,8 @@ interface Config {
   classifier: { useAgent: boolean };
   feeds: { fetchEveryHours: number };
   telegram: { enabled: boolean };
+  agents: Record<Agent, { model: string; effort: Record<'low' | 'medium' | 'high', string> }>;
+  collaboration: { maxConsultsPerTask: number; autoHandoffReview: boolean };
 }
 interface SettingsResponse {
   config: Config;
@@ -35,6 +38,26 @@ interface SettingsResponse {
     billingKeysPresent: string[];
   };
 }
+
+const EFFORTS: Record<Agent, Array<{ value: string; label: string }>> = {
+  claude: [
+    { value: '', label: 'Default' },
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'xhigh', label: 'Extra high' },
+    { value: 'max', label: 'Max' },
+  ],
+  codex: [
+    { value: '', label: 'Default' },
+    { value: 'minimal', label: 'Minimal' },
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'xhigh', label: 'Extra high' },
+  ],
+};
+const LEVELS = ['low', 'medium', 'high'] as const;
 
 const AGENTS = [
   { value: 'claude' as const, label: 'Claude' },
@@ -182,6 +205,69 @@ export default function Settings() {
 
           <section className="panel">
             <div className="panel-head">
+              <h2>Agents</h2>
+              <span className="right faint" style={{ fontSize: 12 }}>
+                each runs in its own official harness
+              </span>
+            </div>
+            {(['claude', 'codex'] as const).map((a) => (
+              <div key={a}>
+                <Row
+                  label={a === 'claude' ? 'Claude Code' : 'Codex'}
+                  hint={a === 'claude' ? 'Model alias or id (e.g. opus, sonnet). Empty uses your Claude Code default.' : 'Model id (e.g. gpt-5-codex). Empty uses your Codex default.'}
+                >
+                  <input
+                    className="input mono"
+                    style={{ width: 200 }}
+                    aria-label={`${a} model`}
+                    placeholder="Plan default"
+                    value={cfg.agents[a].model}
+                    onChange={(e) => set((c) => void (c.agents[a].model = e.target.value.trim()))}
+                  />
+                </Row>
+                <Row label="Reasoning effort by task effort" hint="How hard the agent thinks for low, medium and high effort tasks. Higher uses more of your plan.">
+                  {LEVELS.map((lvl) => (
+                    <label key={lvl} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                      <span className="faint" style={{ textTransform: 'capitalize' }}>{lvl}</span>
+                      <select
+                        className="input"
+                        aria-label={`${a} effort for ${lvl} tasks`}
+                        value={cfg.agents[a].effort[lvl]}
+                        onChange={(e) => set((c) => void (c.agents[a].effort[lvl] = e.target.value))}
+                        style={{ width: 118 }}
+                      >
+                        {EFFORTS[a].map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </Row>
+              </div>
+            ))}
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Collaboration</h2>
+            </div>
+            <Row label="Consults per task" hint="How many times an agent may ask the other one for a second opinion mid-task (consult_agent tool). 0 turns it off.">
+              <Segmented
+                label="Consults per task"
+                value={String(cfg.collaboration.maxConsultsPerTask)}
+                options={['0', '1', '2', '3', '5'].map((v) => ({ value: v, label: v }))}
+                onChange={(v) => set((c) => void (c.collaboration.maxConsultsPerTask = Number(v)))}
+              />
+            </Row>
+            <Row label="Cross-review code tasks" hint="When a code task finishes, hand it to the other agent for a read-only review automatically.">
+              <Switch label="Cross-review code tasks" checked={cfg.collaboration.autoHandoffReview} onChange={(v) => set((c) => void (c.collaboration.autoHandoffReview = v))} />
+            </Row>
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
               <h2>Memory budgets</h2>
             </div>
             <Row label="Context budget per run" hint="CORE.md + project note + skill descriptions. Everything else is fetched on demand.">
@@ -219,6 +305,8 @@ export default function Settings() {
               <NumberInput label="Feed interval hours" value={cfg.feeds.fetchEveryHours} min={1} max={72} suffix="hours" width={72} onChange={(n) => set((c) => void (c.feeds.fetchEveryHours = n))} />
             </Row>
           </section>
+
+          <VoiceSettings />
 
           <section className="panel">
             <div className="panel-head">

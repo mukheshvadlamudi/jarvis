@@ -61,6 +61,8 @@ export class Orchestrator {
   mcpProvider: ((runId: string, taskId: string) => Record<string, McpServerSpec>) | null = null;
   /** Adjusts run input per task (e.g. research enables web search); set by workspaces. */
   readonly inputHooks: Array<(task: Task, input: RunInput) => void> = [];
+  /** Lets a module choose the working folder (e.g. a review handoff reuses the original worktree). */
+  readonly workdirHooks: Array<(task: Task) => Workdir | null> = [];
   context: ContextProvider;
 
   constructor(deps: OrchestratorDeps) {
@@ -230,7 +232,7 @@ export class Orchestrator {
     let workdir: Workdir;
     let ctx;
     try {
-      workdir = await prepareWorkdir(task, project, this.d.dataDir);
+      workdir = this.workdirHooks.map((h) => h(task)).find((w) => w) ?? (await prepareWorkdir(task, project, this.d.dataDir));
       ctx = await this.context.build(task, project);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -263,6 +265,8 @@ export class Orchestrator {
       taskType: task.type,
       vaultPath: this.d.vaultPath,
       mcpServers: this.mcpProvider?.(runId, task.id),
+      effort: cfg.agents[agent].effort[task.effort] || undefined,
+      model: cfg.agents[agent].model || undefined,
     };
     for (const h of this.inputHooks) h(task, input);
 
@@ -307,18 +311,21 @@ export class Orchestrator {
     return result;
   }
 
+  /** Store a normalized event on a run and publish it live (also used by modules, e.g. consults). */
+  recordEvent(taskId: string, runId: string, e: NormalizedEvent): void {
+    if (!this.d.db.isOpen) return;
+    const payload = capPayload(e.payload);
+    const ts = nowIso();
+    const r = run(this.d.db, 'INSERT INTO run_events (run_id, ts, kind, payload_json) VALUES (?, ?, ?, ?)', runId, ts, e.kind, JSON.stringify(payload));
+    const stored: StoredRunEvent = { id: r.lastInsertRowid, run_id: runId, ts, kind: e.kind, payload_json: JSON.stringify(payload) };
+    if (e.kind === 'tool_call') run(this.d.db, 'UPDATE runs SET tool_calls = tool_calls + 1 WHERE id = ?', runId);
+    this.d.bus.publish('run.event', { taskId, ...stored, payload });
+  }
+
   private makeSink(taskId: string, runId: string, agent: AgentId, side = false): RunEventSink {
-    const insert = this.d.db.prepare('INSERT INTO run_events (run_id, ts, kind, payload_json) VALUES (?, ?, ?, ?)');
     let pendingApprovals = 0;
     return {
-      emit: (e: NormalizedEvent) => {
-        const payload = capPayload(e.payload);
-        const ts = nowIso();
-        const r = insert.run(runId, ts, e.kind, JSON.stringify(payload));
-        const stored: StoredRunEvent = { id: Number(r.lastInsertRowid), run_id: runId, ts, kind: e.kind, payload_json: JSON.stringify(payload) };
-        if (e.kind === 'tool_call') run(this.d.db, 'UPDATE runs SET tool_calls = tool_calls + 1 WHERE id = ?', runId);
-        this.d.bus.publish('run.event', { taskId, ...stored, payload });
-      },
+      emit: (e: NormalizedEvent) => this.recordEvent(taskId, runId, e),
       setSessionId: (id: string) => {
         run(this.d.db, 'UPDATE runs SET session_id = ? WHERE id = ?', id, runId);
       },

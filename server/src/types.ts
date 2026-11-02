@@ -29,6 +29,10 @@ export interface Task {
   outward: number;
   route_reason: string | null;
   not_before: string | null;
+  /** Handoff to run when this task finishes (JSON HandoffSpec). */
+  then_json: string | null;
+  /** Where this task was handed off from (JSON HandoffOrigin). */
+  handoff_json: string | null;
 }
 
 export interface Run {

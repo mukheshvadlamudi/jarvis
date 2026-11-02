@@ -20,7 +20,7 @@ describe('Jarvis MCP', () => {
     const init = (await handle({ id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } })) as { result: { serverInfo: { name: string } } };
     expect(init.result.serverInfo.name).toBe('jarvis');
     const list = (await handle({ id: 2, method: 'tools/list' })) as { result: { tools: Array<{ name: string }> } };
-    expect(list.result.tools.map((t) => t.name).sort()).toEqual(['create_task', 'get_usage', 'list_projects', 'notify_owner', 'read_note', 'request_approval', 'save_memory', 'search_memory', 'update_task_status']);
+    expect(list.result.tools.map((t) => t.name).sort()).toEqual(['consult_agent', 'create_task', 'get_usage', 'handoff_to_agent', 'list_projects', 'notify_owner', 'read_note', 'request_approval', 'save_memory', 'search_memory', 'update_task_status']);
     expect(await handle({ method: 'notifications/initialized' })).toBeNull();
     expect(((await handle({ id: 3, method: 'nope' })) as { error: { code: number } }).error.code).toBe(-32601);
   });

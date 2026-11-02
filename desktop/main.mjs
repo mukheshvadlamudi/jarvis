@@ -134,8 +134,15 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: true,
+      // Voice: Jarvis may speak without a click, like a native assistant.
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
+  // The local Jarvis page may use the microphone (hands-free voice); nothing else gets permissions.
+  win.webContents.session.setPermissionRequestHandler((wc, permission, done, details) => {
+    done(permission === 'media' && (details.requestingUrl ?? wc.getURL()).startsWith(ORIGIN));
+  });
+  win.webContents.session.setPermissionCheckHandler((_wc, permission, origin) => permission === 'media' && String(origin).startsWith(ORIGIN));
   win.loadFile(join(here, 'splash.html'));
   win.once('ready-to-show', () => win.show());
 

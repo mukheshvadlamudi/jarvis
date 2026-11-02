@@ -1,10 +1,11 @@
-import { CalendarClock, CornerDownLeft, FileText, ListTodo, Moon, Play, Plus, Search } from 'lucide-react';
+import { CalendarClock, CornerDownLeft, FileText, ListTodo, Mic, Moon, Play, Plus, Search } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, post } from '../lib/api.ts';
 import { STATUS_LABEL } from '../lib/format.ts';
 import { navigate } from '../lib/router.ts';
 import { toggleTheme } from '../lib/theme.ts';
+import { voice } from '../voice/engine.ts';
 import { toast, toastError } from '../lib/toast.ts';
 import type { Task } from '../lib/types.ts';
 import { routes } from '../routes.ts';
@@ -80,6 +81,7 @@ export function Palette({ onClose, onCapture }: { onClose: () => void; onCapture
     const base: PaletteItem[] = [
       { id: 'new', group: 'Actions', label: q.trim() ? `Create task: “${q.trim()}”` : 'New task', hint: 'C', icon: Plus, run: () => (q.trim() ? createQuick(q.trim()) : onCapture()) },
       { id: 'theme', group: 'Actions', label: 'Switch theme', icon: Moon, run: toggleTheme },
+      { id: 'voice', group: 'Actions', label: voice.state.status === 'off' ? 'Turn voice on (hands-free)' : 'Turn voice off', icon: Mic, run: () => void (voice.state.status === 'off' ? voice.start() : voice.stop()) },
       ...paletteCommands,
       ...routes
         .filter((r) => r.nav)

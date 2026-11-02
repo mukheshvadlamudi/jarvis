@@ -15,9 +15,10 @@ type Step =
 
 export type MockScenario = 'success' | 'approval' | 'fail' | 'long' | 'tools';
 
-export function pickScenario(prompt: string): MockScenario | 'learn' | 'cron' {
+export function pickScenario(prompt: string): MockScenario | 'learn' | 'cron' | 'consult' {
   if (prompt.includes('[jarvis:learn]')) return 'learn';
   if (prompt.includes('[jarvis:cron]')) return 'cron';
+  if (prompt.includes('[jarvis:consult]')) return 'consult';
   const m = /\[mock:(success|approval|fail|long|tools)\]/.exec(prompt);
   if (m) return m[1] as MockScenario;
   return 'success';
@@ -47,7 +48,8 @@ const LEARNED_SKILL = {
   },
 };
 
-function stepsFor(input: RunInput, scenario: MockScenario | 'learn' | 'cron'): Step[] {
+function stepsFor(input: RunInput, scenario: MockScenario | 'learn' | 'cron' | 'consult'): Step[] {
+  if (scenario === 'consult') return [{ do: 'tool', tool: 'Read', input: { file_path: 'src/auth/session.ts' }, output: '140 lines' }];
   if (scenario === 'learn') return [msg(JSON.stringify(LEARNED_SKILL))];
   if (scenario === 'cron') return [];
   const title = firstLine(input.prompt) || 'the task';
@@ -121,6 +123,8 @@ function stepsFor(input: RunInput, scenario: MockScenario | 'learn' | 'cron'): S
       steps.push(msg(`Drafting: ${title}`));
       steps.push({ do: 'tool', tool: 'mcp__jarvis__search_memory', input: { query: title.split(' ').slice(0, 4).join(' ') }, output: '3 notes matched' });
       steps.push({ do: 'tool', tool: 'Write', input: { file_path: 'draft.md' }, output: 'Wrote 1,240 words to draft.md' });
+      steps.push({ do: 'file', path: 'draft.md', content: `# ${title}\n\n**Summary:** traffic up 18% month on month, driven by the winter collection preview; newsletter sign-ups doubled after the pop-up form change.\n\n## Highlights\n- 4,812 visits (+18%), 61% mobile\n- Top product: Oak Sideboard (412 views)\n- 96 new newsletter subscribers\n\n## Next month\n1. Launch the winter collection page on 15 Nov.\n2. Add the size guide to product pages.\n` });
+      steps.push({ do: 'file', path: 'traffic.csv', content: 'week,visits,signups\n2026-W40,1082,18\n2026-W41,1164,21\n2026-W42,1249,27\n2026-W43,1317,30\n' });
       steps.push({ do: 'emit', event: { kind: 'file_change', payload: { path: 'draft.md', kind: 'add', additions: 92, deletions: 0 } } });
       break;
     }
@@ -277,8 +281,8 @@ export function createMockRunner(opts: MockRunnerOptions): AgentRunner {
               sink.emit({ kind: 'message', payload: { role: 'assistant', text: `Noted: "${text}". I'll fold that in.` } });
             }
           }
-          const summary = scenario === 'learn' ? JSON.stringify(LEARNED_SKILL) : scenario === 'cron' ? '0 9 * * 1' : summaryFor(input, toolCalls);
-          if (scenario !== 'learn' && scenario !== 'cron') sink.emit({ kind: 'message', payload: { role: 'assistant', text: summary } });
+          const summary = scenario === 'learn' ? JSON.stringify(LEARNED_SKILL) : scenario === 'cron' ? '0 9 * * 1' : scenario === 'consult' ? 'Agree with the per-user lock. One gap: release the lock in a finally block so a thrown rotate() cannot wedge the user. Add a test for two concurrent refreshes.' : summaryFor(input, toolCalls);
+          if (scenario !== 'learn' && scenario !== 'cron' && scenario !== 'consult') sink.emit({ kind: 'message', payload: { role: 'assistant', text: summary } });
           usage.costUsd = Math.round(((usage.inputTokens * 3 + usage.outputTokens * 15) / 1e6) * 10000) / 10000;
           sink.emit({ kind: 'usage', payload: { ...usage } });
           return { status: 'done', summary, sessionId, usage, toolCalls };

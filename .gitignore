@@ -6,3 +6,4 @@ data/
 *.log
 build/
 dist-desktop/
+web/public/voice-runtime/
