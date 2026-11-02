@@ -15,6 +15,7 @@ import type { AgentId } from './types.ts';
 import { UsageMeter } from './usage/meter.ts';
 import { registerRoutes } from './api/register.ts';
 import { authMiddleware } from './api/auth.ts';
+import { localOriginGuard } from './api/origin.ts';
 import { staticWeb } from './api/static.ts';
 import { join } from 'node:path';
 
@@ -62,6 +63,7 @@ export function createServices(opts: CreateAppOptions): Services {
 
 export function createApp(services: Services): Hono {
   const app = new Hono();
+  app.use('/api/*', localOriginGuard(services.env.accessToken));
   app.use('/api/*', authMiddleware(services.env.accessToken));
   registerRoutes(app, services);
   app.notFound((c) => (c.req.path.startsWith('/api/') ? c.json({ error: 'not_found', message: `No API route for ${c.req.method} ${c.req.path}` }, 404) : c.text('Not found', 404)));

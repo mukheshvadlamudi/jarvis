@@ -167,3 +167,29 @@ describe('access token', () => {
     expect((await ctx.app.request('/api/tasks?token=tok')).status).toBe(200);
   });
 });
+
+describe('local origin guard', () => {
+  const post = (url: string, headers: Record<string, string> = {}) =>
+    ctx.app.request(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ text: 'hello' }) });
+
+  it('refuses non-loopback hosts without a token (DNS rebinding)', async () => {
+    ctx = makeCtx();
+    expect((await ctx.app.request('http://evil.example:4317/api/tasks')).status).toBe(403);
+    expect((await ctx.app.request('http://127.0.0.1:4317/api/tasks')).status).toBe(200);
+    expect((await ctx.app.request('http://localhost:5173/api/tasks')).status).toBe(200);
+  });
+
+  it('refuses cross-site writes from a browser', async () => {
+    ctx = makeCtx();
+    expect((await post('http://127.0.0.1:4317/api/tasks', { origin: 'https://evil.example' })).status).toBe(403);
+    expect((await post('http://127.0.0.1:4317/api/tasks', { 'sec-fetch-site': 'cross-site' })).status).toBe(403);
+    expect((await post('http://127.0.0.1:4317/api/tasks', { origin: 'null' })).status).toBe(403);
+    expect((await post('http://127.0.0.1:4317/api/tasks/preview', { origin: 'http://127.0.0.1:4317' })).status).toBe(200);
+  });
+
+  it('leaves remote access to the token when one is set', async () => {
+    ctx = makeCtx({ env: { JARVIS_ACCESS_TOKEN: 'tok', JARVIS_BIND: '0.0.0.0' } });
+    const res = await ctx.app.request('http://100.64.0.5:4317/api/tasks', { headers: { authorization: 'Bearer tok' } });
+    expect(res.status).toBe(200);
+  });
+});
