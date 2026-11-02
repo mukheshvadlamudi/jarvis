@@ -45,9 +45,10 @@ const WIN_ABS = /^[a-zA-Z]:[\\/]|^\\\\/;
 function inside(child: string, parent: string): boolean {
   const childWin = WIN_ABS.test(child);
   const parentWin = WIN_ABS.test(parent);
-  if (childWin || parentWin) {
-    if (childWin !== parentWin) return false;
-    const rel = win32.relative(parent.toLowerCase(), child.toLowerCase());
+  if (process.platform === 'win32' || childWin || parentWin) {
+    // A Windows drive path never contains a POSIX path (and vice versa) when checked on Linux/macOS.
+    if (process.platform !== 'win32' && childWin !== parentWin) return false;
+    const rel = win32.relative(win32.resolve(parent).toLowerCase(), win32.resolve(child).toLowerCase());
     return rel === '' || (!rel.startsWith('..') && !win32.isAbsolute(rel));
   }
   const rel = relative(resolve(parent), resolve(child));
