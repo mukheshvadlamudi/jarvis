@@ -28,3 +28,12 @@ Ambiguities in SPEC.md resolved with the simplest option that keeps the constrai
 19. **Skills sync** copies `Skills/<name>/` into `~/.claude/skills/<name>` and `~/.codex/skills/<name>` with a `.jarvis-manifest.json` per target; same-named skills Jarvis didn't create are skipped, never overwritten. Mock mode targets `data/skills-dry-run/*`. Sync runs on demand (Skills page) and after approving a skill proposal.
 20. **Jarvis MCP server** is a dependency-free stdio JSON-RPC bridge (`server/src/mcp/stdio.ts`) that forwards to `POST /api/mcp/call` with a per-run token (revoked when the run ends). `request_approval` waits up to 10 minutes, then returns `PENDING`; approving later resumes the session. A run that ends with a pending approval leaves the task in "Needs you".
 21. **Codex MCP registration** uses the SDK's `config` option (`--config mcp_servers.jarvis.*`), so the owner's `~/.codex/config.toml` is never edited and no `CODEX_HOME` overlay is needed.
+
+## Phase 2b — Scheduler
+
+22. **Schedules create tasks.** Each firing creates a normal task (`schedule_id` set, title suffixed with the date) so it is routed (`scheduled ⇒ router.scheduledTasks`, Codex by default), visible on the Board and reviewable like any other run.
+23. **Built-in routines build their prompt at fire time** from live Jarvis state (open tasks, plan usage, follow-ups from People/Projects frontmatter, unseen feed items) instead of a static template. All five ship disabled.
+24. **Missed runs:** checked at boot and on wake (a 1-minute heartbeat that arrives > 3 minutes late means the laptop slept). For each enabled schedule, the most recent due time after its last run (or enable time) runs once if < 12 h late; otherwise it is logged as skipped. Never more than one catch-up per schedule.
+25. **“Describe in words”** tries local rules first (weekdays/weekends/named days/daily/every N hours/monthly) and only then makes one small read-only Codex call — only when the owner presses Convert. The result is always validated with croner before use.
+26. **Timezone** is the system timezone (croner default); shown on the Schedules page.
+27. **Home “Follow-ups”** shows anything with `follow_up` due within 7 days (overdue highlighted); the morning brief lists only those due today or earlier.

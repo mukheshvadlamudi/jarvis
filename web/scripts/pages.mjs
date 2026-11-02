@@ -7,5 +7,7 @@ export async function pages() {
     { name: 'memory-proposals', path: '/memory?tab=proposals' },
     { name: 'memory-health', path: '/memory?tab=health' },
     { name: 'skills', path: '/skills' },
+    { name: 'schedules', path: '/schedules' },
+    { name: 'schedule-editor', path: '/schedules', click: 'text=New schedule' },
   ];
 }

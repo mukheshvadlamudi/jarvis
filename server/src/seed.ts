@@ -251,6 +251,7 @@ export function seedIfEmpty(s: Services, now = Date.now()): boolean {
     run(s.db, `INSERT INTO usage_snapshots (ts, agent, window, used_percent, resets_at, source) VALUES (?, 'codex', 'weekly', 26, ?, 'codex-session-log')`, iso(now - 60_000), iso(now + 4.1 * D));
   });
   seedMemory(s, now);
+  seedSchedules(s, now);
   s.bus.publish('seeded', {});
   return true;
 }
@@ -275,4 +276,28 @@ function seedMemory(s: Services, now: number): void {
     '# Staging health check\n\n1. `docker ps` on the VPS — is the site container up and healthy?\n2. `curl -sI https://staging.<site>` — expect 200 and a valid certificate.\n3. Check the last 100 access-log lines for 5xx.\n4. Only then run Lighthouse (`npx lighthouse <url> --quiet --output json`).\n5. Report findings; never restart containers without approval.\n',
     new Date(now - 13 * H).toISOString(),
   );
+}
+
+/** Turn on two routines, add a custom schedule and some history. */
+function seedSchedules(s: Services, now: number): void {
+  const has = get<{ n: number }>(s.db, "SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'schedules'")?.n;
+  if (!has) return;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  run(s.db, "UPDATE schedules SET enabled = 1, enabled_at = ? WHERE built_in IN ('morning_brief', 'updates_digest', 'weekly_review')", iso(now - 20 * D));
+  const custom = newId('sc');
+  run(s.db, `INSERT INTO schedules (id, name, cron, task_template_json, enabled, description, created_at, enabled_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
+    custom, 'Chase unpaid invoices', '0 10 15 * *', JSON.stringify({ title: 'Chase unpaid invoices', type: 'admin', body: 'List invoices older than 14 days from ClientEasy and draft polite reminders (drafts only).' }),
+    'Mid-month reminder drafts for anything over 14 days.', iso(now - 30 * D), iso(now - 30 * D));
+  run(s.db, `INSERT INTO schedules (id, name, cron, task_template_json, enabled, description, created_at) VALUES (?, ?, ?, ?, 0, ?, ?)`,
+    newId('sc'), 'Renewals check', '0 9 1 * *', JSON.stringify({ title: 'Check upcoming renewals (domains, ICO, insurance)', type: 'admin' }), 'Anything renewing in the next 45 days.', iso(now - 30 * D));
+  const ids = Object.fromEntries((s.db.prepare('SELECT id, built_in FROM schedules WHERE built_in IS NOT NULL').all() as Array<{ id: string; built_in: string }>).map((r) => [r.built_in, r.id]));
+  const taskFor = (title: string) => get<{ id: string }>(s.db, 'SELECT id FROM tasks WHERE title LIKE ? ORDER BY created_at DESC LIMIT 1', `${title}%`)?.id ?? null;
+  const add = (sid: string, ago: number, kind: string, title: string | null, note: string | null = null) =>
+    run(s.db, 'INSERT INTO schedule_runs (schedule_id, ts, due_at, kind, task_id, note) VALUES (?, ?, ?, ?, ?, ?)', sid, iso(now - ago), iso(now - ago), kind, title ? taskFor(title) : null, note);
+  add(ids.updates_digest, 30 * H, 'scheduled', 'Updates digest — Node');
+  add(ids.weekly_review, 60 * H, 'scheduled', 'Weekly review');
+  add(ids.morning_brief, 26 * H, 'missed', 'Summarise unread email', 'Ran on wake (missed while asleep)');
+  add(ids.morning_brief, 74 * H, 'skipped', null, 'Missed by 14 h (over 12 h) — skipped');
+  // Mark the weekly and monthly ones as recently run so boot catch-up doesn't log stale skips.
+  run(s.db, "UPDATE schedules SET last_run_at = ? WHERE id = ? OR id = ?", iso(now - 60_000), ids.weekly_review, custom);
 }

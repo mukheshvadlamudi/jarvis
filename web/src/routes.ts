@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { Activity, BookOpen, CheckCircle2, Gauge, Home, KanbanSquare, PlayCircle, Settings, Sparkles } from 'lucide-react';
+import { Activity, BookOpen, CalendarClock, CheckCircle2, Gauge, Home, KanbanSquare, PlayCircle, Settings, Sparkles } from 'lucide-react';
 
 export interface PageProps {
   params: Record<string, string>;
@@ -28,6 +28,7 @@ export const routes: RouteDef[] = [
   { path: '/tasks/:id', title: 'Task', icon: Activity, load: () => import('./pages/Run.tsx') },
   { path: '/memory', title: 'Memory', icon: BookOpen, load: () => import('./pages/Memory.tsx'), nav: 'knowledge', key: 'm', order: 60 },
   { path: '/skills', title: 'Skills', icon: Sparkles, load: () => import('./pages/Skills.tsx'), nav: 'knowledge', key: 's', order: 61 },
+  { path: '/schedules', title: 'Schedules', icon: CalendarClock, load: () => import('./pages/Schedules.tsx'), nav: 'knowledge', key: 'r', order: 62 },
   { path: '/usage', title: 'Usage', icon: Gauge, load: () => import('./pages/Usage.tsx'), nav: 'system', key: 'u', order: 90 },
   { path: '/settings', title: 'Settings', icon: Settings, load: () => import('./pages/Settings.tsx'), nav: 'system', key: ',', order: 99 },
 ];
