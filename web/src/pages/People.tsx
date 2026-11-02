@@ -120,7 +120,7 @@ export default function People() {
       ) : null}
       {!res.loading && !list.length ? (
         <div className="panel">
-          <Empty title="No people notes yet.">Add notes under People/ with frontmatter like company, role, last_contact and follow_up (YYYY-MM-DD). The morning brief lists anyone due.</Empty>
+          <Empty title="No people notes yet">Add notes under People/ with frontmatter like company, role, last_contact and follow_up (YYYY-MM-DD). The morning brief lists anyone due.</Empty>
         </div>
       ) : null}
       {dueNow.length ? (

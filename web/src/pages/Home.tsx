@@ -12,12 +12,11 @@ import { useApi, useNow } from '../lib/hooks.ts';
 import { useLive } from '../lib/live.ts';
 import type { Approval, Task } from '../lib/types.ts';
 
-function greeting(d = new Date()): string {
-  const h = d.getHours();
-  if (h < 5) return 'Working late';
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
+function statusLine(running: number, queued: number, needsYou: number): string {
+  const parts = [running ? `${running} agent${running === 1 ? '' : 's'} running` : 'No agents running'];
+  if (queued) parts.push(`${queued} queued`);
+  if (needsYou) parts.push(`${needsYou} waiting on you`);
+  return parts.join(' · ');
 }
 
 export default function Home() {
@@ -46,11 +45,11 @@ export default function Home() {
   return (
     <div className="page">
       <header className="hero-greeting">
-        <span className="eyebrow">
-          {new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} · {running.length ? `${running.length} running` : 'all systems idle'}
-          {needsYouCount ? ` · ${needsYouCount} awaiting you` : ''}
+        <h1>{new Date(now).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</h1>
+        <span className="status-line">
+          <span className={`dot${running.length ? ' live' : ''}`} />
+          {statusLine(running.length, queued.length, needsYouCount)}
         </span>
-        <h1>{greeting()}.</h1>
       </header>
       <SetupBanner />
       <Systems />
@@ -75,7 +74,7 @@ export default function Home() {
               {approvals.error ? <div className="panel-body"><ErrorBox error={approvals.error} onRetry={approvals.reload} /></div> : null}
               {approvals.loading || active.loading ? <SkeletonRows rows={2} /> : null}
               {!approvals.loading && needsYouCount === 0 ? (
-                <Empty title="You’re clear.">Approvals and blocked tasks land here — agents pause until you decide.</Empty>
+                <Empty title="You’re clear">Approvals and blocked tasks land here — agents pause until you decide.</Empty>
               ) : null}
               {(approvals.data?.approvals ?? []).slice(0, 2).map((a) => (
                 <ApprovalCard key={a.id} a={a} compact onDecided={approvals.reload} />
@@ -107,7 +106,7 @@ export default function Home() {
               {active.error ? <div className="panel-body"><ErrorBox error={active.error} onRetry={active.reload} /></div> : null}
               {active.loading ? <SkeletonRows rows={3} /> : null}
               {!active.loading && running.length + queued.length === 0 ? (
-                <Empty title="No agents are working.">Type a task above and press Enter — it starts as soon as a slot is free (2 at a time).</Empty>
+                <Empty title="No agents are working">Type a task above and press Enter — it starts as soon as a slot is free (2 at a time).</Empty>
               ) : null}
               <ul className="list">
                 {running.map((t) => (
@@ -163,7 +162,7 @@ export default function Home() {
             </div>
             <div className="panel">
               {recent.loading ? <SkeletonRows rows={4} /> : null}
-              {!recent.loading && !recent.data?.tasks.length ? <Empty title="Nothing finished yet.">Completed and failed tasks show here with their result.</Empty> : null}
+              {!recent.loading && !recent.data?.tasks.length ? <Empty title="Nothing finished yet">Completed and failed tasks show here with their result.</Empty> : null}
               <ul className="list">
                 {(recent.data?.tasks ?? []).map((t) => (
                   <li key={t.id}>

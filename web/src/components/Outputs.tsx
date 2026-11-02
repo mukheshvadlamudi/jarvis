@@ -94,7 +94,7 @@ function Preview({ taskId, f }: { taskId: string; f: OutputFile }) {
     };
   }, [url, f.kind, f.size]);
 
-  if (TEXTY.has(f.kind) && f.size > PREVIEW_LIMIT) return <Empty title="Too large to preview here.">Download it to open it in another app.</Empty>;
+  if (TEXTY.has(f.kind) && f.size > PREVIEW_LIMIT) return <Empty title="Too large to preview here">Download it to open it in another app.</Empty>;
   if (err) return <p className="faint">{err}</p>;
   if (TEXTY.has(f.kind) && text === null) return <Skeleton h={160} />;
   switch (f.kind) {

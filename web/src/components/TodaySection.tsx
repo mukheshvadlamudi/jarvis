@@ -30,7 +30,7 @@ export function TodaySection() {
         <div className="panel">
           {!d ? <SkeletonRows rows={2} /> : null}
           {d && !d.upcoming.length && !d.ranToday.length ? (
-            <Empty title="No routines today.">
+            <Empty title="No routines today">
               Turn on the Morning brief or add your own in <Link to="/schedules" className="muted">Schedules</Link>.
             </Empty>
           ) : null}
@@ -65,7 +65,7 @@ export function TodaySection() {
         </div>
         <div className="panel">
           {!d ? <SkeletonRows rows={2} /> : null}
-          {d && !d.followUps.length ? <Empty title="Nothing due this week.">Set <code>follow_up: YYYY-MM-DD</code> in a People note’s frontmatter to see it here.</Empty> : null}
+          {d && !d.followUps.length ? <Empty title="Nothing due this week">Set <code>follow_up: YYYY-MM-DD</code> in a People note’s frontmatter to see it here.</Empty> : null}
           <ul className="list">
             {d?.followUps.map((f) => (
               <li key={f.path}>

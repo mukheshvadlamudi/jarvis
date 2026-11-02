@@ -148,7 +148,7 @@ export default function Research() {
         {desktop ? (
           <div className="panel detail-pane">
             <div className="panel-body" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
-              {current ? <Reader key={current.path} r={current} /> : <Empty title="Pick a report to read it." />}
+              {current ? <Reader key={current.path} r={current} /> : <Empty title="Pick a report to read it" />}
             </div>
           </div>
         ) : current ? (

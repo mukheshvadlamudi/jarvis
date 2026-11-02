@@ -66,7 +66,7 @@ function SourcesSheet({ sources, onClose, reload }: { sources: Source[]; onClose
         RSS, Atom and GitHub <code>releases.atom</code> feeds are parsed; any other page is watched for changes. Fetching is plain HTTP — no agent, no plan usage.
       </p>
       <div className="panel">
-        {!sources.length ? <Empty title="No sources yet." /> : null}
+        {!sources.length ? <Empty title="No sources yet" /> : null}
         <ul className="list">
           {sources.map((s) => (
             <li key={s.id} className="row" style={{ flexWrap: 'wrap' }}>
@@ -202,7 +202,7 @@ export default function Updates() {
           sources.data?.sources.length ? (
             <Empty title={view === 'unseen' ? 'You’re caught up.' : 'Nothing fetched yet.'}>The daily Updates digest summarises new items and marks them seen once it finishes.</Empty>
           ) : (
-            <Empty title="Follow releases, blogs and changelogs." action={<button className="btn" onClick={() => setManage(true)}><Plus size={14} strokeWidth={1.5} /> Add a source</button>}>
+            <Empty title="Follow releases, blogs and changelogs" action={<button className="btn" onClick={() => setManage(true)}><Plus size={14} strokeWidth={1.5} /> Add a source</button>}>
               Add RSS/Atom feeds, GitHub releases.atom URLs, or any page to watch for changes.
             </Empty>
           )

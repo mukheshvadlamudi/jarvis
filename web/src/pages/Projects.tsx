@@ -259,7 +259,7 @@ export default function Projects() {
       ) : null}
       {!res.loading && !list.length ? (
         <div className="panel">
-          <Empty title="No projects yet." action={<button className="btn" onClick={() => setEditing('new')}><Plus size={14} strokeWidth={1.5} /> New project</button>}>
+          <Empty title="No projects yet" action={<button className="btn" onClick={() => setEditing('new')}><Plus size={14} strokeWidth={1.5} /> New project</button>}>
             Register local repos so coding tasks run in isolated git worktrees, and clients or areas so tasks pick up the right vault note.
           </Empty>
         </div>

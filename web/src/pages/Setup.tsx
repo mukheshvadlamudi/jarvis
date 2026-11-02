@@ -283,7 +283,7 @@ export default function Setup() {
       {res.error ? <ErrorBox error={res.error} onRetry={res.reload} /> : null}
       {d ? (
         <div className="progress" style={{ marginBottom: 24 }} role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label="Setup progress">
-          <span style={{ width: `${pct}%` }} />
+          <span style={{ transform: `scaleX(${pct / 100})` }} />
         </div>
       ) : null}
       {d?.pendingRestart ? (
@@ -380,7 +380,7 @@ export default function Setup() {
                 </div>
               </div>
             ) : installed() ? (
-              <Empty title="Running as an installed app." />
+              <Empty title="Running as an installed app" />
             ) : (
               <>
                 <p className="muted">Lightest option: install Jarvis from the browser as an app — its own window, taskbar/dock icon and Start-menu entry. (There is also a full desktop app with tray and notifications; see Releases.)</p>

@@ -163,7 +163,7 @@ export default function Skills() {
           </span>
         </div>
         {res.loading ? <SkeletonRows rows={5} /> : null}
-        {d && !d.skills.length ? <Empty title="No skills in your vault yet.">Add Skills/&lt;name&gt;/SKILL.md with name and description frontmatter, or start from a connector template below.</Empty> : null}
+        {d && !d.skills.length ? <Empty title="No skills in your vault yet">Add Skills/&lt;name&gt;/SKILL.md with name and description frontmatter, or start from a connector template below.</Empty> : null}
         <ul className="list">
           {d?.skills.map((s) => (
             <li key={s.id} className="row" style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -207,7 +207,7 @@ export default function Skills() {
             </span>
           </div>
           <ul className="list">
-            {result.actions.filter((a) => a.action !== 'unchanged').length === 0 ? <Empty title="Nothing to change." /> : null}
+            {result.actions.filter((a) => a.action !== 'unchanged').length === 0 ? <Empty title="Nothing to change" /> : null}
             {result.actions
               .filter((a) => a.action !== 'unchanged')
               .map((a, i) => (
