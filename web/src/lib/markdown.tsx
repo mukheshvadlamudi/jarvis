@@ -148,7 +148,7 @@ export function Markdown({ source, onWiki }: { source: string; onWiki?: (target:
               <Tag key={i}>
                 {b.items.map((it, j) => (
                   <li key={j} style={{ ...(it.checked !== undefined ? { listStyle: 'none', marginLeft: -18 } : {}), ...(it.depth ? { marginLeft: it.depth * 18, listStyleType: 'circle' } : {}) }}>
-                    {it.checked !== undefined ? <input type="checkbox" checked={it.checked} readOnly aria-label={it.checked ? 'done' : 'not done'} style={{ marginRight: 8, accentColor: 'var(--accent)' }} /> : null}
+                    {it.checked !== undefined ? <input type="checkbox" checked={it.checked} readOnly aria-label={it.checked ? 'done' : 'not done'} style={{ marginRight: 8, accentColor: 'var(--primary)' }} /> : null}
                     {inline(it.text, onWiki)}
                   </li>
                 ))}

@@ -339,8 +339,8 @@ pre {
     min-width: 16px;
     padding: 0 4px;
     border-radius: 999px;
-    background: var(--accent);
-    color: var(--accent-ink);
+    background: var(--warning);
+    color: var(--bg);
     font: 600 10px / 16px var(--mono);
   }
   .tab-capture {
@@ -348,8 +348,8 @@ pre {
     width: 48px;
     height: 40px;
     border-radius: var(--r-panel);
-    background: var(--accent);
-    color: var(--accent-ink);
+    background: var(--primary);
+    color: var(--primary-ink);
     display: grid;
     place-items: center;
     border: 0;
@@ -383,9 +383,9 @@ pre {
   cursor: not-allowed;
 }
 .btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
 }
 .btn.primary:hover {
   filter: brightness(1.06);
@@ -556,12 +556,12 @@ kbd {
   transition: transform var(--t-fast) var(--ease), background var(--t-fast);
 }
 .switch[aria-checked='true'] {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--primary);
+  border-color: var(--primary);
 }
 .switch[aria-checked='true']::after {
   transform: translateX(14px);
-  background: var(--accent-ink);
+  background: var(--primary-ink);
 }
 
 .segmented {

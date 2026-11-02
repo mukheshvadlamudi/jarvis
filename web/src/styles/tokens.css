@@ -16,7 +16,8 @@
 /*
  * "Workshop at night" (dark, default): a near-neutral ink graphite ramp, hairlines drawn in the
  * text colour, and arc-reactor cyan as the one accent. Cyan marks the primary action, the current
- * selection and anything an agent is doing right now; nothing else is lit. Amber is reserved for
+ * selection and anything an agent is doing right now; nothing else is lit. The primary
+ * button is the off-white of the text ramp (ink in light mode), never a cyan slab. Amber is reserved for
  * things that need the owner. Agent orange/violet only ever say which agent something belongs to.
  * Depth comes from surface steps, never from glow. (Direction from the unslop skill, @heydamir.)
  */
@@ -35,6 +36,8 @@
   --accent: #4fd1f7;
   --accent-text: #6fd9f8;
   --accent-ink: #06222c;
+  --primary: #eceef3;
+  --primary-ink: #0c0e13;
   --accent-soft: rgba(79, 209, 247, 0.1);
   --accent-line: rgba(79, 209, 247, 0.4);
   --success: #4cc38a;
@@ -95,6 +98,8 @@
   --accent: #0777a3;
   --accent-text: #0777a3;
   --accent-ink: #ffffff;
+  --primary: #11151e;
+  --primary-ink: #ffffff;
   --accent-soft: rgba(7, 119, 163, 0.09);
   --accent-line: rgba(7, 119, 163, 0.4);
   --success: #16834f;
@@ -128,6 +133,8 @@
     --accent: #0777a3;
     --accent-text: #0777a3;
     --accent-ink: #ffffff;
+  --primary: #11151e;
+  --primary-ink: #ffffff;
     --accent-soft: rgba(7, 119, 163, 0.09);
     --accent-line: rgba(7, 119, 163, 0.4);
     --success: #16834f;

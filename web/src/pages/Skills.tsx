@@ -140,7 +140,7 @@ export default function Skills() {
       {res.error ? <ErrorBox error={res.error} onRetry={res.reload} /> : null}
 
       {proposals.data?.proposals.length ? (
-        <section className="panel" style={{ marginBottom: 24, borderColor: 'var(--accent)' }}>
+        <section className="panel" style={{ marginBottom: 24, borderColor: 'var(--border-strong)' }}>
           <div className="panel-head">
             <h2>Proposed by agents</h2>
             <span className="count">{proposals.data.proposals.length}</span>

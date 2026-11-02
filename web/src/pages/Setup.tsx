@@ -161,7 +161,7 @@ function ProjectsAction({ roots, onAdded }: { roots: string[]; onAdded: () => vo
                       else n.delete(r.path);
                       setPicked(n);
                     }}
-                    style={{ accentColor: 'var(--accent)', width: 16, height: 16 }}
+                    style={{ accentColor: 'var(--primary)', width: 16, height: 16 }}
                   />
                   <div className="row-stack">
                     <span className="title">{r.name}</span>

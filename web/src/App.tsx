@@ -42,9 +42,8 @@ function Mark() {
   return (
     <svg className="brand-mark" viewBox="0 0 64 64" aria-hidden>
       <circle cx="32" cy="32" r="29" fill="none" stroke="var(--border-strong)" strokeWidth="2" />
-      <circle cx="32" cy="32" r="21" fill="none" stroke="var(--accent)" strokeWidth="3" strokeDasharray="10 4.3" opacity="0.9" />
-      <circle cx="32" cy="32" r="9" fill="var(--accent)" opacity="0.95" />
-      <circle cx="32" cy="32" r="13" fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity="0.5" />
+      <circle cx="32" cy="32" r="21" fill="none" stroke="var(--text-muted)" strokeWidth="3" strokeDasharray="10 4.3" />
+      <circle cx="32" cy="32" r="9" fill="var(--accent)" />
     </svg>
   );
 }

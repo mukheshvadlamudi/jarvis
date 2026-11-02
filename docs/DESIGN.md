@@ -38,7 +38,7 @@ Dark (default):
 ```
 Light ("Lab"): `--bg #F6F7F9`, `--bg-raised #FFFFFF`, hairlines `rgba(17,21,30,.08)`, `--text #11151E`, `--text-muted #4A5263`, `--text-faint #677083`, `--accent #0777A3` (5:1 with white), agents `#B24E24` / `#6A52C9`. All text at least 4.5:1.
 
-Accent budget: cyan marks only the primary action, the current selection and live agent activity. Amber is only for things that need the owner. Agent colours only say which agent.
+Accent budget: cyan marks only the current selection and live agent activity (lamp, running labels, reactor core). Primary buttons, switches and checkboxes use `--primary`: the off-white of the text ramp in dark, ink in light. Amber is only for things that need the owner. Agent colours only say which agent.
 
 Type: **Geist** (UI) and **Geist Mono** (IDs, tokens, timestamps, commands, telemetry figures), self-hosted. Scale 11 / 12 / 13 / 14 (base) / 16 / 20 / 24 / 28. Weights 400 and 500; 600 only for rare emphasis. Page titles 24–28 at 500. Section labels 13px, weight 500, muted text, sentence case. Telemetry figures mono 28 at 400, tabular. No negative tracking under 16px.
 
