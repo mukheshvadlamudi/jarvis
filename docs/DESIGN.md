@@ -2,46 +2,39 @@
 
 The bar: it should feel like a premium, focused tool (think Linear, Raycast, Things) — calm, dense, fast, precise. **No AI slop.** If a choice looks like a default template, it's wrong.
 
+## Direction (updated on the owner's request: "sci-fi Jarvis", premium, both themes perfect)
+Dark mode is a **Stark HUD**: near-black navy, a faint 32px blueprint grid, hairline panels with accent corner ticks, mono uppercase telemetry labels, and arc-reactor cyan as the single interactive accent. It should feel like a precision instrument (Linear/Raycast density, X "lights out" contrast), not a movie prop: glow only on live/focused things, never decorative.
+Light mode is **Lab**: cool paper whites, ink text, the same structure with no grid and no glow.
+
 ## Banned
-- Purple/blue "AI" gradients, glowing orbs, sparkle ✨ icons, robot/brain illustrations.
-- Glassmorphism, heavy drop shadows, neon, rainbow charts.
-- Emoji as icons. Stock illustrations. Lorem ipsum. "Welcome to Jarvis 👋" hero banners.
-- Cards inside cards. Every element in its own bordered box. Giant rounded pills everywhere.
+- Purple/blue "AI" gradients, sparkle ✨ icons, robot/brain illustrations, stock art.
+- Glassmorphism panels, heavy drop shadows, neon outlines everywhere, rainbow charts, scanline/glitch effects.
+- Emoji as icons. Lorem ipsum. "Welcome to Jarvis 👋" banners.
+- Cards inside cards. Giant rounded pills everywhere.
 - Default browser form controls, unstyled scrollbars, layout shift on load.
 - Generic copy ("Something went wrong", "No data"). Every empty/error state says what happened and what to do next.
 
-## Character
-A **command centre at night**: dark-first, warm graphite neutrals, one precise accent, monospace for machine data. Information-dense but breathing. Motion is quick and purposeful, never decorative.
+## Tokens (`web/src/styles/tokens.css`; HUD layer in `hud.css`)
 
-## Tokens (define as CSS custom properties on `:root`, light variant under `[data-theme="light"]` and `prefers-color-scheme`)
-
-Colour — dark (default):
+Dark (default, "Stark HUD"):
 ```
---bg:            #0E0F11   page
---bg-raised:     #151619   panels, sidebar
---bg-sunken:     #0A0B0C   inputs, code, transcript
---bg-hover:      #1C1D21
---border:        #24262B   hairlines (1px)
---border-strong: #33363D
---text:          #ECECEE
---text-muted:    #9A9CA3
---text-faint:    #64666D
---accent:        #E8A55A   amber — focus rings, primary action, active nav, live indicators
---accent-ink:    #1A1206   text on accent
---success:       #5FB98A
---warning:       #E2B24A
---danger:        #E5675B
---info:          #6FA3D8
---agent-claude:  #D97757   warm clay
---agent-codex:   #5BB5A2   cool teal
+--bg #05080D  --bg-raised #0A1119  --bg-sunken #03060A  --bg-hover #0F1924
+--border rgba(125,211,252,.10)  --border-strong rgba(125,211,252,.20)
+--text #E4EEF7  --text-muted #93A7B9  --text-faint #71869A
+--accent #3CCFFF (arc reactor)  --accent-ink #021019
+--warning #F5B544 (approvals / needs you)  --success #3DDC97  --danger #FF6170  --info #7AA2FF
+--agent-claude #F08A5D  --agent-codex #B7A5FF
+--glow 0 0 0 1px rgba(60,207,255,.35), 0 0 24px rgba(60,207,255,.18)   (live + focus only)
 ```
-Light: `--bg #FAFAF9`, `--bg-raised #FFFFFF`, `--bg-sunken #F3F3F1`, `--border #E6E5E1`, `--text #16171A`, `--text-muted #5E6068`, `--accent #C27A2C` (keep contrast ≥ 4.5:1 for text, ≥ 3:1 for UI).
+Light ("Lab"): `--bg #F4F7FA`, `--bg-raised #FFFFFF`, `--border #DDE5EC`, `--text #0B1620`, `--text-muted #4B5C6C`, `--accent #0A86B8` (AA on white), agents `#B24E24` / `#6A52C9`. All text ≥ 4.5:1.
 
-Type: **Geist** (UI) and **Geist Mono** (IDs, tokens, timestamps, commands, code) — self-hosted from the `geist` npm package, no font CDN. Scale: 12 / 13 / 14 (base) / 16 / 20 / 28. Weights 400/500/600 only. Tabular numbers for all metrics (`font-variant-numeric: tabular-nums`). Letter-spacing −0.01em on ≥20px.
+Type: **Geist** (UI) and **Geist Mono** (IDs, tokens, timestamps, commands, telemetry labels) — self-hosted. Scale 11 / 12 / 13 / 14 (base) / 16 / 20 / 22 / 28. Section and panel labels: mono 11px, uppercase, 0.12em tracking, with a small diamond marker. Tabular numbers for all metrics.
 
-Space: 4px grid (4, 8, 12, 16, 24, 32, 48). Radius: 6 (controls), 10 (panels), 999 only for status dots. Shadows: only for overlays (palette, menus, toasts): `0 12px 32px rgba(0,0,0,.45)` + 1px border.
+Space: 4px grid. Radius: 6 (controls), 10 (panels), 999 only for dots. Shadows only on overlays.
 
-Motion: 120–180 ms, `cubic-bezier(.2,.8,.2,1)`. Animate opacity/transform only. Respect `prefers-reduced-motion`. Live runs: a subtle pulsing 6px accent dot, nothing else animated.
+Motion: 120–180 ms, `cubic-bezier(.2,.8,.2,1)`, opacity/transform only; the reactor's outer tick ring rotates once per 24 s; live dots pulse. All of it off under `prefers-reduced-motion`.
+
+Signature elements: the **reactor** (concentric arcs = Claude/Codex 5 h + weekly usage, centre = active runs) and the **telemetry strip** on Home; corner ticks on panels; "› ASK JARVIS" command bar.
 
 Icons: `lucide-react`, 16px, 1.5 stroke, `currentColor`.
 

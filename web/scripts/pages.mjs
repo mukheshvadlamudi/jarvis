@@ -12,6 +12,7 @@ export async function pages() {
     { name: 'updates', path: '/updates' },
     { name: 'projects', path: '/projects' },
     { name: 'people', path: '/people' },
+    { name: 'setup', path: '/setup' },
     { name: 'schedule-editor', path: '/schedules', click: 'text=New schedule' },
   ];
 }

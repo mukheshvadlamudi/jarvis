@@ -13,36 +13,48 @@
   font-display: swap;
 }
 
+/*
+ * "Stark HUD" (dark, default): near-black navy, arc-reactor cyan as the single interactive accent,
+ * amber reserved for things that need the owner (approvals, warnings). Glow is used sparingly and
+ * only on live/focused elements.
+ */
 :root {
   color-scheme: dark;
-  --bg: #0e0f11;
-  --bg-raised: #151619;
-  --bg-sunken: #0a0b0c;
-  --bg-hover: #1c1d21;
-  --bg-active: #222328;
-  --border: #24262b;
-  --border-strong: #33363d;
-  --text: #ececee;
-  --text-muted: #9a9ca3;
-  --text-faint: #7d7f86;
-  --accent-text: #e8a55a;
-  --accent: #e8a55a;
-  --accent-ink: #1a1206;
-  --accent-soft: rgba(232, 165, 90, 0.12);
-  --success: #5fb98a;
-  --warning: #e2b24a;
-  --danger: #e5675b;
-  --info: #6fa3d8;
-  --agent-claude: #d97757;
-  --agent-codex: #5bb5a2;
-  --success-soft: rgba(95, 185, 138, 0.12);
-  --danger-soft: rgba(229, 103, 91, 0.12);
-  --warning-soft: rgba(226, 178, 74, 0.12);
-  --overlay: rgba(5, 5, 6, 0.6);
-  --shadow-overlay: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --bg: #05080d;
+  --bg-raised: #0a1119;
+  --bg-sunken: #03060a;
+  --bg-hover: #0f1924;
+  --bg-active: #13202d;
+  --border: rgba(125, 211, 252, 0.1);
+  --border-strong: rgba(125, 211, 252, 0.2);
+  --text: #e4eef7;
+  --text-muted: #93a7b9;
+  --text-faint: #71869a;
+  --accent: #3ccfff;
+  --accent-text: #6fdcff;
+  --accent-ink: #021019;
+  --accent-soft: rgba(60, 207, 255, 0.12);
+  --accent-line: rgba(60, 207, 255, 0.45);
+  --success: #3ddc97;
+  --warning: #f5b544;
+  --danger: #ff6170;
+  --info: #7aa2ff;
+  --agent-claude: #f08a5d;
+  --agent-codex: #b7a5ff;
+  --success-soft: rgba(61, 220, 151, 0.12);
+  --danger-soft: rgba(255, 97, 112, 0.12);
+  --warning-soft: rgba(245, 181, 68, 0.13);
+  --overlay: rgba(1, 4, 8, 0.72);
+  --shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(125, 211, 252, 0.08);
+  --glow: 0 0 0 1px rgba(60, 207, 255, 0.35), 0 0 24px rgba(60, 207, 255, 0.18);
+  --glow-soft: 0 0 18px rgba(60, 207, 255, 0.22);
+  --grid-line: rgba(125, 211, 252, 0.035);
+  --hud-tick: rgba(60, 207, 255, 0.55);
+  --panel-sheen: linear-gradient(180deg, rgba(125, 211, 252, 0.035), rgba(125, 211, 252, 0) 120px);
 
   --font: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Consolas, monospace;
+  --fs-11: 11px;
   --fs-12: 12px;
   --fs-13: 13px;
   --fs-14: 14px;
@@ -64,66 +76,79 @@
   --t-fast: 120ms;
   --t: 180ms;
 
-  --sidebar-w: 232px;
-  --tabbar-h: 60px;
+  --sidebar-w: 240px;
+  --tabbar-h: 62px;
 }
 
+/* "Lab" (light): cool paper whites, ink text, a deeper cyan that passes AA on white. No glow, no grid. */
 :root[data-theme='light'] {
   color-scheme: light;
-  --bg: #fafaf9;
+  --bg: #f4f7fa;
   --bg-raised: #ffffff;
-  --bg-sunken: #f3f3f1;
-  --bg-hover: #f0efec;
-  --bg-active: #e9e8e4;
-  --border: #e6e5e1;
-  --border-strong: #d6d4ce;
-  --text: #16171a;
-  --text-muted: #5e6068;
-  --text-faint: #6b6d75;
-  --accent-text: #9a5d1c;
-  --accent: #c27a2c;
+  --bg-sunken: #edf2f6;
+  --bg-hover: #eef3f7;
+  --bg-active: #e3ebf2;
+  --border: #dde5ec;
+  --border-strong: #c9d5df;
+  --text: #0b1620;
+  --text-muted: #4b5c6c;
+  --text-faint: #5d6e7f;
+  --accent: #0a86b8;
+  --accent-text: #076d96;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(194, 122, 44, 0.1);
-  --success: #2f8a5c;
-  --warning: #a8770f;
-  --danger: #c4473b;
-  --info: #3a72ad;
-  --agent-claude: #b2512f;
-  --agent-codex: #22766a;
-  --success-soft: rgba(47, 138, 92, 0.1);
-  --danger-soft: rgba(196, 71, 59, 0.1);
-  --warning-soft: rgba(168, 119, 15, 0.1);
-  --overlay: rgba(22, 23, 26, 0.28);
-  --shadow-overlay: 0 12px 32px rgba(22, 23, 26, 0.14);
+  --accent-soft: rgba(10, 134, 184, 0.1);
+  --accent-line: rgba(10, 134, 184, 0.4);
+  --success: #12825a;
+  --warning: #a06a00;
+  --danger: #c93545;
+  --info: #3460c9;
+  --agent-claude: #b24e24;
+  --agent-codex: #6a52c9;
+  --success-soft: rgba(18, 130, 90, 0.1);
+  --danger-soft: rgba(201, 53, 69, 0.09);
+  --warning-soft: rgba(160, 106, 0, 0.1);
+  --overlay: rgba(11, 22, 32, 0.32);
+  --shadow-overlay: 0 24px 64px rgba(11, 22, 32, 0.16), 0 0 0 1px rgba(11, 22, 32, 0.06);
+  --glow: 0 0 0 3px rgba(10, 134, 184, 0.18);
+  --glow-soft: none;
+  --grid-line: transparent;
+  --hud-tick: rgba(10, 134, 184, 0.45);
+  --panel-sheen: none;
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
     color-scheme: light;
-    --bg: #fafaf9;
+    --bg: #f4f7fa;
     --bg-raised: #ffffff;
-    --bg-sunken: #f3f3f1;
-    --bg-hover: #f0efec;
-    --bg-active: #e9e8e4;
-    --border: #e6e5e1;
-    --border-strong: #d6d4ce;
-    --text: #16171a;
-    --text-muted: #5e6068;
-    --text-faint: #6b6d75;
-  --accent-text: #9a5d1c;
-    --accent: #c27a2c;
+    --bg-sunken: #edf2f6;
+    --bg-hover: #eef3f7;
+    --bg-active: #e3ebf2;
+    --border: #dde5ec;
+    --border-strong: #c9d5df;
+    --text: #0b1620;
+    --text-muted: #4b5c6c;
+    --text-faint: #5d6e7f;
+    --accent: #0a86b8;
+    --accent-text: #076d96;
     --accent-ink: #ffffff;
-    --accent-soft: rgba(194, 122, 44, 0.1);
-    --success: #2f8a5c;
-    --warning: #a8770f;
-    --danger: #c4473b;
-    --info: #3a72ad;
-    --agent-claude: #b2512f;
-    --agent-codex: #22766a;
-    --success-soft: rgba(47, 138, 92, 0.1);
-    --danger-soft: rgba(196, 71, 59, 0.1);
-    --warning-soft: rgba(168, 119, 15, 0.1);
-    --overlay: rgba(22, 23, 26, 0.28);
-    --shadow-overlay: 0 12px 32px rgba(22, 23, 26, 0.14);
+    --accent-soft: rgba(10, 134, 184, 0.1);
+    --accent-line: rgba(10, 134, 184, 0.4);
+    --success: #12825a;
+    --warning: #a06a00;
+    --danger: #c93545;
+    --info: #3460c9;
+    --agent-claude: #b24e24;
+    --agent-codex: #6a52c9;
+    --success-soft: rgba(18, 130, 90, 0.1);
+    --danger-soft: rgba(201, 53, 69, 0.09);
+    --warning-soft: rgba(160, 106, 0, 0.1);
+    --overlay: rgba(11, 22, 32, 0.32);
+    --shadow-overlay: 0 24px 64px rgba(11, 22, 32, 0.16), 0 0 0 1px rgba(11, 22, 32, 0.06);
+    --glow: 0 0 0 3px rgba(10, 134, 184, 0.18);
+    --glow-soft: none;
+    --grid-line: transparent;
+    --hud-tick: rgba(10, 134, 184, 0.45);
+    --panel-sheen: none;
   }
 }

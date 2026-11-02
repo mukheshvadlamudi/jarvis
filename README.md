@@ -6,18 +6,18 @@ See [SPEC.md](SPEC.md) for the design, [docs/DESIGN.md](docs/DESIGN.md) for the 
 
 ## Requirements
 - Node 24+ and git
-- `claude` CLI logged in with your Claude plan (`claude` → `/login`)
-- `codex` CLI logged in with ChatGPT (`codex login`)
+- A Claude Pro/Max and a ChatGPT Plus/Pro subscription (the Claude Code and Codex CLIs ship inside Jarvis — just log in once)
 - Optional: `gh` CLI (for approval-gated "Open PR"), a Telegram bot
 
 Jarvis removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` and `CODEX_API_KEY` from every agent it starts, so usage always comes from your plans.
 
-## Run
-```
-npm install
-cp .env.example .env      # set JARVIS_VAULT to your Obsidian vault and JARVIS_RUNNER=real
-npm start                 # builds the UI and serves http://127.0.0.1:4317
-```
+## Run (one click)
+- **Windows:** double-click `start-jarvis.cmd` · **macOS:** `start-jarvis.command` · **Linux:** `./start-jarvis.sh`
+- Or `npm run app` (add `--demo`, or `npm run demo`, to try it without your plans).
+
+The launcher installs and builds on first run, offers the Claude/Codex logins (`npm run login:claude`, `npm run login:codex`), starts Jarvis and opens the **Setup** page, which connects your vault, code folders, skills, routines and Telegram. Then install it as an app from the browser. Full guide for you or anyone you share it with: [docs/INSTALL.md](docs/INSTALL.md).
+
+Manual: `npm install && cp .env.example .env && npm start`.
 Development (hot reload): `npm run dev` → API on :4317, UI on http://127.0.0.1:5173.
 
 Try everything without touching your plans: `JARVIS_RUNNER=mock` gives scripted runs plus believable demo data (a copy of `fixtures/vault`, a demo git repo, feeds, schedules, approvals).

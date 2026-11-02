@@ -1,6 +1,8 @@
 import { serve } from '@hono/node-server';
 import { createApp, createServices } from './app.ts';
+import { join } from 'node:path';
 import { loadEnv } from './config.ts';
+import { readLocalEnv } from './setup/checks.ts';
 import { setupModules } from './modules.ts';
 import { seedIfEmpty } from './seed.ts';
 import { presentBillingKeys } from './util/env.ts';
@@ -9,7 +11,9 @@ import { logger } from './util/log.ts';
 const log = logger('jarvis');
 
 async function main(): Promise<void> {
-  const env = loadEnv();
+  // Choices made on the Setup page (data/local-env.json) win over .env defaults.
+  const base = loadEnv();
+  const env = loadEnv({ ...process.env, ...readLocalEnv(join(base.dataDir, 'local-env.json')) });
   const keys = presentBillingKeys();
   if (keys.length) {
     log.warn(`${keys.join(', ')} set in this environment. Jarvis removes them from every agent it starts, so runs still use your Claude/ChatGPT plan logins.`);
@@ -31,7 +35,7 @@ async function main(): Promise<void> {
   });
   s.orchestrator.tick();
 
-  const shutdown = async (signal: string) => {
+  const shutdown = async (signal: string, code = 0) => {
     log.info(`${signal}: shutting down`);
     s.orchestrator.stop();
     s.usage.stop();
@@ -44,8 +48,10 @@ async function main(): Promise<void> {
     }
     server.close();
     s.db.close();
-    process.exit(0);
+    process.exit(code);
   };
+  // Used by the Setup page's "Restart" (exit code 75 tells the launcher to start Jarvis again).
+  s.modules.requestShutdown = (code: number) => void shutdown('restart', code);
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }

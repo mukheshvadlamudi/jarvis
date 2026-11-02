@@ -7,7 +7,7 @@ import { speechSupported, startDictation } from '../lib/speech.ts';
 import { dismiss, toast, useToasts } from '../lib/toast.ts';
 import type { AgentId, TaskStatus, UsageWindow } from '../lib/types.ts';
 
-export function Link(props: { to: string; className?: string; children: ReactNode; title?: string; style?: React.CSSProperties; 'aria-current'?: 'page' | undefined; onClick?: () => void }) {
+export function Link(props: { to: string; className?: string; children: ReactNode; title?: string; style?: React.CSSProperties; 'aria-current'?: 'page' | undefined; onClick?: () => void; role?: string }) {
   const handler = linkHandler(props.to);
   return (
     <a
@@ -15,6 +15,7 @@ export function Link(props: { to: string; className?: string; children: ReactNod
       className={props.className}
       title={props.title}
       style={props.style}
+      role={props.role}
       aria-current={props['aria-current']}
       onClick={(e) => {
         props.onClick?.();

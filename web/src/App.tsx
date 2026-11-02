@@ -38,9 +38,10 @@ const NAV_GROUPS: Array<{ key: NonNullable<RouteDef['nav']>; label: string | nul
 function Mark() {
   return (
     <svg className="brand-mark" viewBox="0 0 64 64" aria-hidden>
-      <rect width="64" height="64" rx="14" fill="var(--bg-active)" />
-      <path d="M38 17v20.5a9.5 9.5 0 0 1-17.4 5.3" fill="none" stroke="var(--accent)" strokeWidth="6" strokeLinecap="round" />
-      <circle cx="38" cy="17" r="3" fill="var(--accent)" />
+      <circle cx="32" cy="32" r="29" fill="none" stroke="var(--border-strong)" strokeWidth="2" />
+      <circle cx="32" cy="32" r="21" fill="none" stroke="var(--accent)" strokeWidth="3" strokeDasharray="10 4.3" opacity="0.9" />
+      <circle cx="32" cy="32" r="9" fill="var(--accent)" opacity="0.95" />
+      <circle cx="32" cy="32" r="13" fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity="0.5" />
     </svg>
   );
 }
