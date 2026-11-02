@@ -3,7 +3,7 @@
 Jarvis is a **local app**: a small server on your computer plus its interface. There is no cloud service and no shared account — each person runs their own copy with their own Claude and ChatGPT plans. Two ways to run it:
 
 ## Option A — Desktop app (recommended)
-1. Download the installer for your system from the project's **Releases** page (or from the latest **Actions → Desktop app** run, under *Artifacts*):
+1. Download the installer for your system from the project's **Releases** page (or from a manually started **Actions → Desktop app → Run workflow** run, under *Artifacts*, kept for 3 days):
    - Windows: `Jarvis-Setup-x.y.z.exe` (or `Jarvis-Portable-x.y.z.exe`, no install)
    - macOS: `Jarvis-x.y.z-arm64.dmg` (unsigned: first open with right-click → Open)
    - Linux: `Jarvis-x.y.z-x86_64.AppImage` or `.deb`
