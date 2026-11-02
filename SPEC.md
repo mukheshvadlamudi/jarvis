@@ -112,6 +112,14 @@ Migrations are plain numbered `.sql` files applied in order at boot.
 6. **Write back** — result summary on the task; outputs saved (`Research/…md`, branch/PR, draft); one line appended to today's vault daily note; memory/skill proposals created if warranted.
 7. **Learn** — runs with ≥ `learning.minToolCalls` (default 8) tool calls trigger a skill-proposal step (see §9).
 
+## Ask
+
+- Conversations are tasks in `chat` mode; every message creates a run, answered immediately outside the background concurrency limit.
+- Live thinking, real tool steps and streamed answers share one thread. Each message can choose an agent, model and effort; Ask both and Second opinion bring in the other agent. Remember saves an answer to notes; history is searchable.
+- Question-shaped messages use the plan with more headroom (or the agent selected in Settings); instructions use task routing. Attachments are copied into the run folder; images and Claude PDFs go inline.
+- Plan usage is reported by Claude Code itself and Codex session logs. The Connectors page manages each agent's MCP connections through its own CLI, from the owner UI only.
+- Voice questions open conversations, speak occasional real activity cues, and read the opening 2–3 sentences of the answer.
+
 ## 6. Router
 
 Config in `data/config.json` (defaults shipped in code):
@@ -210,8 +218,8 @@ Registered via Claude SDK `mcpServers` and Codex config overrides (verify the Co
 - **Run totals:** tokens from each SDK's final usage event → `runs`.
 - **Plan windows:**
   - Codex: session JSONL under `~/.codex/sessions/**` contains `token_count` events with `rate_limits` (`primary` ≈ 5-hour, `secondary` ≈ weekly, each with `used_percent` and reset time). Read the newest event → `usage_snapshots`.
-  - Claude: use any rate-limit/usage info the Agent SDK exposes on messages; otherwise estimate from `~/.claude/projects/**/*.jsonl` token totals over rolling 5 h / 7 d against owner-configurable soft caps. Label estimates clearly as estimates.
-- Poll every 2 min (cheap file reads, only files modified since last poll). Home shows two bars per agent (5 h, weekly) with reset times.
+  - Claude: Claude Code's own /usage data from a prompt-free SDK session (source `claude-usage`) every 5 minutes, plus `claude-sdk` readings during runs. Transcript estimates and soft caps were removed.
+- Poll Codex session logs at the configured interval (only files modified since last poll). Overview shows two bars per agent (5 h, weekly) with reset times; missing windows say "Not reported yet".
 
 ## 15. API (selection)
 

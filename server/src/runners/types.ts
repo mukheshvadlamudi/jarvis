@@ -1,4 +1,4 @@
-import type { AgentId, RunEventKind, TaskType } from '../types.ts';
+import type { AgentId, Attachment, RunEventKind, TaskType } from '../types.ts';
 
 /** Stdio MCP server definition handed to both agents. */
 export interface McpServerSpec {
@@ -29,6 +29,16 @@ export interface RunInput {
   effort?: string;
   /** Model override; undefined = CLI/plan default. */
   model?: string;
+  /** Files the owner attached, already copied into `cwd`. Images (and PDFs on Claude) go in the message. */
+  attachments?: Attachment[];
+}
+
+/** Text or thinking as it streams in. Not stored: the finished message arrives as a normal event. */
+export interface LiveDelta {
+  kind: 'text' | 'thinking' | 'reset';
+  text?: string;
+  /** true = `text` is the whole message so far (Codex); false = append (Claude). */
+  replace?: boolean;
 }
 
 export interface NormalizedEvent {
@@ -62,6 +72,8 @@ export interface RunEventSink {
   setSessionId(id: string): void;
   requestApproval(req: ApprovalRequest): Promise<ApprovalDecision>;
   rateLimit(reading: RateLimitReading): void;
+  /** Optional: stream partial text/thinking to the UI. */
+  live?(delta: LiveDelta): void;
 }
 
 export interface RunUsage {

@@ -3,7 +3,8 @@
  * Uses the owner's saved ChatGPT login: `env` is passed explicitly (so the SDK does not inherit
  * process.env) with every API-key variable removed, and no `apiKey` option is ever set.
  */
-import type { CodexOptions, ThreadEvent, ThreadItem, ThreadOptions, TurnOptions } from '@openai/codex-sdk';
+import type { CodexOptions, Input, ThreadEvent, ThreadItem, ThreadOptions, TurnOptions } from '@openai/codex-sdk';
+import { attachmentNote, inlineKind } from './attachments.ts';
 import { sanitizedAgentEnv } from '../util/env.ts';
 import type { AgentRunner, RunEventSink, RunHandle, RunInput, RunResult } from './types.ts';
 import { emptyUsage } from './types.ts';
@@ -11,7 +12,7 @@ import { emptyUsage } from './types.ts';
 /** The subset of the SDK the runner needs; tests inject a fake. */
 export interface ThreadLike {
   readonly id: string | null;
-  runStreamed(input: string, turnOptions?: TurnOptions): Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+  runStreamed(input: Input, turnOptions?: TurnOptions): Promise<{ events: AsyncGenerator<ThreadEvent> }>;
 }
 export interface CodexLike {
   startThread(options?: ThreadOptions): ThreadLike;
@@ -53,15 +54,25 @@ export function buildCodexOptions(input: RunInput, env: NodeJS.ProcessEnv): { co
   return { codex: { env: sanitizedAgentEnv(env), config }, thread };
 }
 
+/** Text prompt, plus attached images as `local_image` entries (Codex passes them with --image). */
+export function buildCodexInput(text: string, input: RunInput): Input {
+  const full = `${text}${attachmentNote(input.attachments)}`;
+  const images = (input.attachments ?? []).filter((a) => inlineKind(a, 'codex') === 'image');
+  if (!images.length) return full;
+  return [{ type: 'text', text: full }, ...images.map((a) => ({ type: 'local_image' as const, path: a.path }))];
+}
+
 function itemEvents(item: ThreadItem, phase: 'started' | 'updated' | 'completed', sink: RunEventSink, counters: { toolCalls: number }): string | null {
   switch (item.type) {
     case 'agent_message':
+      if (phase !== 'completed' && item.text) sink.live?.({ kind: 'text', text: item.text, replace: true });
       if (phase === 'completed' && item.text.trim()) {
         sink.emit({ kind: 'message', payload: { role: 'assistant', text: item.text } });
         return item.text;
       }
       return null;
     case 'reasoning':
+      if (phase !== 'completed' && item.text) sink.live?.({ kind: 'thinking', text: item.text, replace: true });
       if (phase === 'completed' && item.text.trim()) sink.emit({ kind: 'message', payload: { role: 'reasoning', text: item.text } });
       return null;
     case 'command_execution':
@@ -125,13 +136,16 @@ export function createCodexRunner(deps: CodexRunnerDeps = {}): AgentRunner {
           const codex = factory(codexOptions);
           const thread = input.resumeSessionId ? codex.resumeThread(input.resumeSessionId, threadOptions) : codex.startThread(threadOptions);
           const prompt = input.contextPrefix ? `${input.contextPrefix}\n\n---\n\n${input.prompt}` : input.prompt;
-          const { events } = await thread.runStreamed(input.resumeSessionId ? input.prompt : prompt, { signal: abort.signal });
+          const { events } = await thread.runStreamed(buildCodexInput(input.resumeSessionId ? input.prompt : prompt, input), { signal: abort.signal });
           for await (const ev of events) {
             switch (ev.type) {
               case 'thread.started':
                 sessionId = ev.thread_id;
                 sink.setSessionId(ev.thread_id);
                 sink.emit({ kind: 'status', payload: { status: 'started', detail: `Codex thread ${ev.thread_id} · sandbox ${input.sandbox}`, sessionId: ev.thread_id } });
+                break;
+              case 'turn.started':
+                sink.live?.({ kind: 'reset' });
                 break;
               case 'item.started':
                 itemEvents(ev.item, 'started', sink, counters);

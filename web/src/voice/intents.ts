@@ -10,7 +10,8 @@ export type Intent =
   | { kind: 'result' }
   | { kind: 'cancel' }
   | { kind: 'mute' }
-  | { kind: 'task'; text: string };
+  | { kind: 'task'; text: string }
+  | { kind: 'conversation'; text: string };
 
 const WAKE = /^\s*(?:hey|ok|okay|hi|yo)?[\s,]*(?:jarvis|jarvis's|travis|jervis|javis)\b[\s,.!?:-]*/i;
 const clean = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, ' ').replace(/\s+/g, ' ').trim();
@@ -32,6 +33,8 @@ export function parseUtterance(raw: string, opts: { requireWake: boolean; awaiti
   if (stripped === null && opts.requireWake && !opts.awaiting) return { kind: 'ignore' };
   const body = stripped ?? text;
   if (!body) return { kind: 'wake' };
+  const ask = /^ask\s+([\s\S]+)/i.exec(body);
+  if (ask) return { kind: 'conversation', text: ask[1].trim() };
   const c = clean(body);
   if (/^(stop|quiet|shut up|be quiet|that's enough|enough|cancel that|never mind|nevermind)$/.test(c)) return { kind: 'stop' };
   if (/^(repeat|say that again|what did you say|again)$/.test(c)) return { kind: 'repeat' };
@@ -43,5 +46,7 @@ export function parseUtterance(raw: string, opts: { requireWake: boolean; awaiti
   if (/^(usage|how much (usage|quota) (do i have|is left)|plan usage|limits?)$/.test(c)) return { kind: 'usage' };
   if (/^(read (it|the result|that)|what did it (say|find)|read me the (result|summary)|results?)$/.test(c)) return { kind: 'result' };
   if (/^(cancel|stop) (the |that |last )?(task|run)$/.test(c)) return { kind: 'cancel' };
-  return { kind: 'task', text: body.replace(/^(please|can you|could you)\s+/i, '').replace(/[.?!]+$/, '') };
+  const request = body.replace(/^(please|can you|could you)\s+/i, '');
+  const task = /^(research|draft|write|build|create|fix|implement|schedule|send|run|review|update|delete|remind)\b/i.test(request);
+  return { kind: task ? 'task' : 'conversation', text: task ? request.replace(/[.?!]+$/, '') : body };
 }

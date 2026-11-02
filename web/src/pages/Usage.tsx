@@ -45,15 +45,9 @@ export default function Usage() {
           </div>
           <div className="panel-body">
             <UsageMeters data={d ?? null} />
-            {d && (d.current.claude.five_hour?.estimate || d.current.claude.weekly?.estimate) ? (
-              <p className="faint" style={{ fontSize: 12, marginTop: 12 }}>
-                Claude windows marked “estimate” are computed from local transcripts against soft caps of {tokens(d.softCaps.fiveHourTokens)} (5 h) and {tokens(d.softCaps.weeklyTokens)} (weekly) — adjust them in{' '}
-                <Link to="/settings" className="muted">
-                  Settings
-                </Link>
-                . Live runs replace estimates with Claude’s own readings.
-              </p>
-            ) : null}
+            <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>
+              Claude's numbers come from Claude Code (checked every 5 minutes and during runs). Codex's come from its own session logs.
+            </p>
           </div>
         </section>
         <section className="panel">

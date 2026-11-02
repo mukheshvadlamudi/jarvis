@@ -57,6 +57,7 @@ Icons: `lucide-react`, 16px, 1.5 stroke, `currentColor`.
 
 ## Key components
 - **Command bar** (Home top): single large input, placeholder rotates real examples ("Research the best Postgres backup tools", "Fix the login bug in ClientEasy"); shows predicted type, project and agent chips before submit; mic button for dictation; Enter to create, Shift+Enter newline.
+- **Ask**: one conversation column with user messages, live thinking and collapsible real tool steps, then the streamed answer. The composer provides attachments and per-message agent/model/effort controls; an agent strip shows status and real plan usage. Quiet answer actions: Ask both, Second opinion and Remember; searchable history sits alongside the thread.
 - **Agent badge**: small dot + name in agent colour (`Claude`, `Codex`). Routing reason on hover/tap.
 - **Status**: dot + label; the `running` dot is the lit lamp and gently pulses (it is live). Consistent everywhere.
 - **Usage meter**: per agent two thin bars (5 h, weekly), percent in mono, "resets in 2h 14m". Bar turns warning at 70%, danger at 85% (the router fallback threshold, marked on the bar).

@@ -16,7 +16,7 @@ const only = process.argv.find((a) => a.startsWith('--only='))?.slice(7).split('
 
 const dataDir = mkdtempSync(join(tmpdir(), 'jarvis-shots-'));
 const server = spawn(process.execPath, [join(root, 'server/src/index.ts')], {
-  env: { ...process.env, JARVIS_RUNNER: 'mock', JARVIS_DATA_DIR: dataDir, JARVIS_PORT: String(port), JARVIS_MOCK_DELAY_MS: '2500', JARVIS_SEED: '1', JARVIS_LOG_LEVEL: 'warn' },
+  env: { ...process.env, JARVIS_RUNNER: 'mock', JARVIS_DATA_DIR: dataDir, JARVIS_VAULT: 'fixtures/vault', JARVIS_PORT: String(port), JARVIS_MOCK_DELAY_MS: '2500', JARVIS_SEED: '1', JARVIS_SEED_REPOS: '0', JARVIS_LOG_LEVEL: 'warn' },
   stdio: ['ignore', 'inherit', 'inherit'],
 });
 
@@ -46,7 +46,11 @@ try {
   const codeTask = done.tasks.find((t) => t.title.startsWith('Fix the token refresh race')) ?? done.tasks[0];
   const extra = JSON.parse(process.env.SHOT_PAGES ?? '[]');
   let pages = [
-    { name: 'home', path: '/' },
+    { name: 'ask', path: '/' },
+    { name: 'ask-conversation', path: '/c/t_demo_auth' },
+    { name: 'ask-work', path: '/c/t_demo_auth', action: () => { document.querySelector('.ask-thread').scrollTop = 0; }, click: '.work-toggle >> nth=0' },
+    { name: 'home', path: '/overview' },
+    { name: 'connectors', path: '/connectors' },
     { name: 'board', path: '/board' },
     { name: 'run', path: `/tasks/${codeTask.id}` },
     { name: 'approvals', path: '/approvals' },

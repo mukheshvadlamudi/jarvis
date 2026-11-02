@@ -12,11 +12,11 @@ import { VoiceSettings } from '../components/VoiceSettings.tsx';
 
 type Agent = 'claude' | 'codex';
 interface Config {
-  router: { defaults: Record<string, Agent>; effortOverride: { high?: Agent; medium?: Agent; low?: Agent }; scheduledTasks: Agent; fallbackAtPercent: number };
+  router: { defaults: Record<string, Agent>; effortOverride: { high?: Agent; medium?: Agent; low?: Agent }; scheduledTasks: Agent; chat: 'headroom' | Agent; fallbackAtPercent: number };
   maxConcurrentRuns: number;
   memory: { contextBudgetTokens: number; coreCapTokens: number; projectCapTokens: number };
   learning: { enabled: boolean; minToolCalls: number };
-  usage: { pollSeconds: number; claudeSoftCaps: { fiveHourTokens: number; weeklyTokens: number } };
+  usage: { pollSeconds: number };
   approvals: { expiryHours: number };
   classifier: { useAgent: boolean };
   feeds: { fetchEveryHours: number };
@@ -171,6 +171,9 @@ export default function Settings() {
                 <Segmented label={`${type} agent`} value={cfg.router.defaults[type]} options={AGENTS} onChange={(v) => set((c) => void (c.router.defaults[type] = v))} />
               </Row>
             ))}
+            <Row label="Questions on Ask" hint="Plain questions go to the plan with more room left, or always to one agent">
+              <Segmented label="Questions on Ask" value={cfg.router.chat} options={[{ value: 'headroom', label: 'More room' }, ...AGENTS]} onChange={(v) => set((c) => void (c.router.chat = v))} />
+            </Row>
             <Row label="High-effort tasks" hint="Big refactors, migrations and deep dives.">
               <Segmented label="High effort agent" value={cfg.router.effortOverride.high ?? 'claude'} options={AGENTS} onChange={(v) => set((c) => void (c.router.effortOverride.high = v))} />
             </Row>
@@ -285,10 +288,6 @@ export default function Settings() {
             <div className="panel-head">
               <h2>Usage meter</h2>
             </div>
-            <Row label="Claude soft caps" hint="Used only for estimates from local transcripts when Claude hasn’t reported its own numbers.">
-              <NumberInput label="Five hour token cap" value={cfg.usage.claudeSoftCaps.fiveHourTokens} min={1} max={1e9} step={100000} suffix="/ 5 h" width={130} onChange={(n) => set((c) => void (c.usage.claudeSoftCaps.fiveHourTokens = n))} />
-              <NumberInput label="Weekly token cap" value={cfg.usage.claudeSoftCaps.weeklyTokens} min={1} max={1e10} step={1000000} suffix="/ week" width={130} onChange={(n) => set((c) => void (c.usage.claudeSoftCaps.weeklyTokens = n))} />
-            </Row>
             <Row label="Read usage logs every">
               <NumberInput label="Poll seconds" value={cfg.usage.pollSeconds} min={30} max={3600} step={30} suffix="seconds" onChange={(n) => set((c) => void (c.usage.pollSeconds = n))} />
             </Row>

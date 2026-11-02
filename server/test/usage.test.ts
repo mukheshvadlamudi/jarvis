@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseClaudeLine, parseCodexLine } from '../src/usage/meter.ts';
+import { parseCodexLine } from '../src/usage/meter.ts';
 import { REPO, makeCtx } from './helpers.ts';
 import type { TestCtx } from './helpers.ts';
 
@@ -21,32 +21,32 @@ describe('usage parsers', () => {
     expect(parseCodexLine({ type: 'event_msg', payload: { type: 'agent_message' } })).toBeNull();
   });
 
-  it('weights Claude cache reads at 10%', () => {
-    const e = parseClaudeLine({ type: 'assistant', timestamp: '2026-11-01T07:30:47.000Z', requestId: 'r1', message: { id: 'm1', usage: { input_tokens: 10, output_tokens: 100, cache_creation_input_tokens: 1000, cache_read_input_tokens: 20000 } } });
-    expect(e?.tokens).toBe(10 + 100 + 1000 + 2000);
-    expect(parseClaudeLine({ type: 'user', timestamp: 'x' })).toBeNull();
-  });
 });
 
 describe('usage meter on fixture logs', () => {
-  it('takes the newest Codex snapshot and estimates Claude windows', () => {
+  it('takes the newest Codex snapshot and never guesses Claude from transcripts', () => {
     ctx = makeCtx({ env: { JARVIS_CODEX_HOME: codexHome, JARVIS_CLAUDE_HOME: claudeHome } });
     const now = Date.parse('2026-11-01T10:00:00.000Z');
     ctx.s.usage.poll(now);
     const cur = ctx.s.usage.current(now);
     expect(cur.codex.five_hour).toMatchObject({ usedPercent: 27.5, source: 'codex-session-log', estimate: false });
     expect(cur.codex.weekly?.usedPercent).toBe(26);
-    expect(cur.claude.five_hour?.estimate).toBe(true);
-    const est = ctx.s.usage.claudeEstimate(now);
-    // 24 deduped assistant lines on 1 Nov fall in the 5 h window; the 28 Oct file only counts weekly.
-    expect(est.fiveHour).toBeGreaterThan(50_000);
-    expect(est.weekly).toBeGreaterThan(est.fiveHour);
-    expect(cur.claude.five_hour?.tokens).toBe(est.fiveHour);
+    // Claude transcripts are on disk, but token totals are not the plan's limits: unknown until Claude reports.
+    expect(cur.claude.five_hour).toBeNull();
+    expect(cur.claude.weekly).toBeNull();
     // Re-polling unchanged files reads nothing new and adds no rows.
     const before = ctx.s.db.prepare('SELECT COUNT(*) AS n FROM usage_snapshots').get() as { n: number };
     ctx.s.usage.poll(now);
     const after = ctx.s.db.prepare('SELECT COUNT(*) AS n FROM usage_snapshots').get() as { n: number };
     expect(after.n).toBe(before.n);
+  });
+
+  it('ignores old estimate rows', () => {
+    ctx = makeCtx();
+    ctx.s.db.prepare("INSERT INTO usage_snapshots (ts, agent, window, used_percent, tokens, resets_at, source) VALUES (?, 'claude', 'five_hour', 97, 1, ?, 'estimate')").run(new Date().toISOString(), new Date(Date.now() + 3600_000).toISOString());
+    expect(ctx.s.usage.current().claude.five_hour).toBeNull();
+    ctx.s.usage.recordReading({ agent: 'claude', window: 'five_hour', usedPercent: 69, resetsAt: new Date(Date.now() + 3600_000).toISOString(), source: 'claude-usage' });
+    expect(ctx.s.usage.current().claude.five_hour).toMatchObject({ usedPercent: 69, source: 'claude-usage' });
   });
 
   it('treats a window whose reset has passed as 0% and prefers live SDK readings', () => {

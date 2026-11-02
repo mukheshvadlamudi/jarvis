@@ -10,18 +10,21 @@ import type {
   PermissionResult,
   SDKMessage,
   SDKRateLimitInfo,
+  SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import { readFileSync } from 'node:fs';
 import { classifyToolCall, humanSummary } from '../approvals/policy.ts';
 import { sanitizedAgentEnv } from '../util/env.ts';
 import type { AgentRunner, RunEventSink, RunHandle, RunInput, RunResult } from './types.ts';
 import { describeToolInput, emptyUsage } from './types.ts';
+import { attachmentNote, inlineKind } from './attachments.ts';
 
 /** The subset of the SDK `Query` object Jarvis uses; lets tests inject a fake. */
 export interface QueryLike extends AsyncIterable<SDKMessage> {
   interrupt?: () => Promise<unknown>;
   close?: () => void;
 }
-export type QueryFn = (params: { prompt: string; options?: Options }) => QueryLike;
+export type QueryFn = (params: { prompt: string | AsyncIterable<SDKUserMessage>; options?: Options }) => QueryLike;
 
 export interface ClaudeRunnerDeps {
   queryFn?: QueryFn;
@@ -62,6 +65,30 @@ export function rateLimitToReading(info: SDKRateLimitInfo): { window: 'five_hour
   const resetsAt = typeof info.resetsAt === 'number' ? new Date(info.resetsAt < 1e12 ? info.resetsAt * 1000 : info.resetsAt).toISOString() : null;
   return { window, usedPercent: Math.max(0, Math.min(100, pct)), resetsAt };
 }
+
+/**
+ * The run's prompt. Plain text unless images or PDFs are attached: those go in the message itself
+ * (base64 content blocks over streaming input), so Claude sees them without a tool call.
+ */
+export function buildClaudePrompt(input: RunInput): string | AsyncIterable<SDKUserMessage> {
+  const text = `${input.prompt}${attachmentNote(input.attachments)}`;
+  const inline = (input.attachments ?? []).filter((a) => inlineKind(a, 'claude'));
+  if (!inline.length) return text;
+  const content: Array<Record<string, unknown>> = [{ type: 'text', text }];
+  for (const a of inline) {
+    const data = readFileSync(a.path).toString('base64');
+    content.push(inlineKind(a, 'claude') === 'image'
+      ? { type: 'image', source: { type: 'base64', media_type: a.mime, data } }
+      : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data }, title: a.name });
+  }
+  const message = { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null } as unknown as SDKUserMessage;
+  return (async function* () {
+    yield message;
+  })();
+}
+
+/** Thinking summaries need the adaptive-thinking models; older pinned ids keep their own default. */
+const ADAPTIVE = /^(default|opus|sonnet|fable|haiku)$|^claude-(opus|sonnet|fable|haiku)-[5-9]/;
 
 /** Build the SDK options for one run. Exported for unit tests. */
 export function buildClaudeOptions(input: RunInput, sink: RunEventSink, abortController: AbortController, env: NodeJS.ProcessEnv): Options {
@@ -120,9 +147,14 @@ export function buildClaudeOptions(input: RunInput, sink: RunEventSink, abortCon
     settingSources: ['user', 'project', 'local'],
     systemPrompt: { type: 'preset', preset: 'claude_code', append: input.contextPrefix },
     additionalDirectories: input.additionalDirectories,
-    env: sanitizedAgentEnv(env, { CLAUDE_AGENT_SDK_CLIENT_APP: 'jarvis/0.1' }),
+    // Claude Code waits for every connector before the first turn (30 s default). Plugin connectors
+    // that never connect made each answer start 30 s late; 8 s keeps healthy ones and fails the rest.
+    env: sanitizedAgentEnv(env, { CLAUDE_AGENT_SDK_CLIENT_APP: 'jarvis/0.1', MCP_TIMEOUT: env.MCP_TIMEOUT ?? env.JARVIS_CLAUDE_MCP_TIMEOUT_MS ?? '8000' }),
     ...(input.effort ? { effort: input.effort as NonNullable<Options['effort']> } : {}),
     ...(input.model ? { model: input.model } : {}),
+    // Stream text and thinking as they are written, so Ask shows the answer forming live.
+    includePartialMessages: true,
+    ...(!input.model || ADAPTIVE.test(input.model) ? { thinking: { type: 'adaptive', display: 'summarized' } as const } : {}),
   };
 }
 
@@ -144,7 +176,7 @@ export function createClaudeRunner(deps: ClaudeRunnerDeps = {}): AgentRunner {
         try {
           const queryFn = deps.queryFn ?? (await loadQuery());
           const options = buildClaudeOptions(input, sink, abortController, deps.env ?? process.env);
-          q = queryFn({ prompt: input.prompt, options });
+          q = queryFn({ prompt: buildClaudePrompt(input), options });
           for await (const m of q) {
             if (m.type === 'system' && m.subtype === 'init') {
               sessionId = m.session_id;
@@ -156,10 +188,18 @@ export function createClaudeRunner(deps: ClaudeRunnerDeps = {}): AgentRunner {
                 return { status: 'failed', summary: 'Aborted: Claude was about to use an API key instead of your plan login.', error: 'api_key_billing', sessionId, usage, toolCalls };
               }
               sink.emit({ kind: 'status', payload: { status: 'started', detail: `Claude Code ${m.claude_code_version} · ${m.model}`, sessionId: m.session_id } });
+            } else if (m.type === 'stream_event') {
+              if (m.parent_tool_use_id || !sink.live) continue;
+              const ev = m.event as { type: string; delta?: { type?: string; text?: string; thinking?: string } };
+              if (ev.type === 'message_start') sink.live({ kind: 'reset' });
+              else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) sink.live({ kind: 'text', text: ev.delta.text });
+              else if (ev.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta' && ev.delta.thinking) sink.live({ kind: 'thinking', text: ev.delta.thinking });
             } else if (m.type === 'assistant') {
               if (m.parent_tool_use_id) continue; // subagent chatter stays out of the transcript
               for (const block of m.message.content) {
-                if (block.type === 'text' && block.text.trim()) {
+                if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.trim()) {
+                  sink.emit({ kind: 'message', payload: { role: 'reasoning', text: block.thinking } });
+                } else if (block.type === 'text' && block.text.trim()) {
                   lastAssistantText = block.text;
                   sink.emit({ kind: 'message', payload: { role: 'assistant', text: block.text } });
                 } else if (block.type === 'tool_use') {

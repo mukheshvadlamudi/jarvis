@@ -15,7 +15,7 @@ const stateListeners = new Set<() => void>();
 let retry = 1000;
 
 const TYPES = [
-  'hello', 'task.created', 'task.updated', 'task.deleted', 'run.started', 'run.event', 'run.finished',
+  'hello', 'task.created', 'task.updated', 'task.deleted', 'run.started', 'run.event', 'run.delta', 'run.finished', 'agents.updated',
   'approval.created', 'approval.updated', 'usage.updated', 'project.created', 'project.updated', 'seeded',
   'memory.updated', 'memory.proposal', 'skills.updated', 'schedule.updated', 'schedule.ran', 'feed.updated', 'notify',
 ];

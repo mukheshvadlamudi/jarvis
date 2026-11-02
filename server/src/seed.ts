@@ -195,6 +195,8 @@ export function seedIfEmpty(s: Services, now = Date.now()): boolean {
       }
     }
 
+    seedConversations(s, now, projectIds);
+
     // A decided approval for history.
     run(s.db, `INSERT INTO approvals (id, run_id, task_id, kind, summary, detail_json, status, created_at, decided_at, decided_via, note)
       VALUES (?, NULL, NULL, 'git_push', 'Push jarvis/t_7pd-release-notes to origin', ?, 'approved', ?, ?, 'web', 'Looks good')`,
@@ -258,6 +260,80 @@ export function seedIfEmpty(s: Services, now = Date.now()): boolean {
   seedWorkspaces(s, now);
   s.bus.publish('seeded', {});
   return true;
+}
+
+/** Ask history uses the same stored events as live conversations. */
+function seedConversations(s: Services, now: number, projectIds: Record<string, string>): void {
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const conversations = [
+    {
+      id: 't_demo_auth', title: 'ClientEasy auth review', project: 'clienteasy', type: 'code' as const,
+      agent: 'claude' as const, model: 'claude-sonnet-4-6', effort: 'high', ago: 0.8 * H,
+      prompt: 'Review the auth middleware in ClientEasy. What should we fix before the Northwind launch?',
+      thinking: 'I’ll trace session refresh and route protection, then check the tests. I’ll separate confirmed failure paths from risks that depend on deployment.',
+      answer: 'The main risk is **concurrent token refresh**. Two requests can read the same refresh token before either writes the replacement.\n\n### Before the Northwind launch\n\n1. **Serialize refresh per user.** Put the read and rotation inside the same lock in `src/auth/session.ts`.\n2. **Reject expired sessions consistently.** Return `401` from the API and let the client show the sign-in screen.\n3. **Cover parallel requests.** Add a test that refreshes twice at once and verifies both requests receive the current session.\n\nThe route guard already checks workspace membership. Keep that check on the server. I’ve only reviewed the code; no files changed.',
+      steps: [
+        { tool: 'Read', input: { file_path: 'src/auth/session.ts' }, activity: 'Reading src/auth/session.ts', output: 'Refresh reads the stored token before rotating it; no per-user lock.' },
+        { tool: 'Grep', input: { pattern: 'requireSession', path: 'src/api' }, activity: 'Tracing session checks across API routes', output: 'Protected routes use requireSession and verify workspace membership.' },
+        { tool: 'Read', input: { file_path: 'test/auth/session.test.ts' }, activity: 'Checking coverage for concurrent refresh requests', output: 'Expiry is covered; parallel refresh is not covered.' },
+      ],
+    },
+    {
+      id: 't_demo_backups', title: 'ClientEasy backup decision', project: 'clienteasy', type: 'other' as const,
+      agent: 'codex' as const, model: 'gpt-5.3-codex', effort: 'medium', ago: 3 * H,
+      prompt: 'What did I decide about the ClientEasy backups?',
+      thinking: 'I’ll find the decision in the project note and check the daily entry for any later change. A plan to test restore is different from a verified backup.',
+      answer: 'You chose **nightly encrypted Postgres backups to B2**, with a weekly restore check on a separate database.\n\n- Keep 14 daily copies and 8 weekly copies.\n- Keep credentials outside the repository.\n- Confirm a restore before moving Northwind onto the new setup.\n\nThe project note records the decision. The daily entry still lists the first restore drill as open, so the setup is **not yet verified**.\n\nSource: `Projects/ClientEasy.md`, “Backups” and the 1 November daily note.',
+      steps: [
+        { tool: 'mcp__jarvis__search_memory', input: { query: 'ClientEasy backups' }, activity: 'Checking your notes for “ClientEasy backups”', output: 'Found Projects/ClientEasy.md and DAILY/2026-11-01.md.' },
+        { tool: 'mcp__jarvis__read_note', input: { path: 'Projects/ClientEasy.md' }, activity: 'Reading the backup decision in ClientEasy', output: 'Nightly encrypted backups to B2; 14 daily and 8 weekly copies; weekly restore drill.' },
+        { tool: 'mcp__jarvis__read_note', input: { path: 'DAILY/2026-11-01.md' }, activity: 'Checking whether the restore drill is complete', output: 'First restore drill remains open before the Northwind launch.' },
+      ],
+    },
+    {
+      id: 't_demo_launch', title: 'Harbor & Pine launch reply', project: 'harbor', type: 'write' as const,
+      agent: 'claude' as const, model: 'claude-sonnet-4-6', effort: 'low', ago: 22 * H,
+      prompt: 'Use the attached launch checklist to draft a short reply to Sam. Keep the date conditional on the final content review.',
+      thinking: 'I’ll read the checklist and the client note, then draft a reply that makes the outstanding review clear without promising a firm launch date.',
+      answer: 'Here’s a draft for Sam:\n\n> Hi Sam,\n>\n> We’re aiming for Thursday for the Harbor & Pine launch, provided the final content review is signed off by Wednesday afternoon. The remaining items are the returns copy and the two product photos on your checklist.\n>\n> If those need more time, I’ll confirm a revised date once they’re ready.\n>\n> Best,\n> Mukhesh\n\nDraft only. Nothing has been sent.',
+      steps: [
+        { tool: 'Read', input: { file_path: 'attachments/launch-checklist.md' }, activity: 'Reading the attached launch checklist', output: 'Open: returns copy and two product photos. Target: Thursday, conditional on content approval.' },
+        { tool: 'mcp__jarvis__read_note', input: { path: 'Projects/Harbor & Pine.md' }, activity: 'Checking the Harbor & Pine launch context', output: 'Sam owns final content sign-off. Keep client replies short and specific.' },
+      ],
+    },
+  ];
+  for (const c of conversations) {
+    const at = now - c.ago;
+    const reason = c.agent === 'claude' ? `${c.type} → claude` : 'question → codex (more plan room)';
+    run(s.db, `INSERT INTO tasks (id, title, body, type, status, project_id, agent_pref, agent, effort, mode, created_at, updated_at, result_summary, route_reason)
+      VALUES (?, ?, ?, ?, 'done', ?, 'auto', ?, ?, 'chat', ?, ?, ?, ?)`,
+      c.id, c.title, c.prompt, c.type, projectIds[c.project], c.agent, c.effort, iso(at), iso(at + 40_000), c.answer, reason);
+    const addRun = (agent: AgentId, model: string, answer: string, routeReason: string, start: number, side = false) => {
+      const id = newId('r');
+      const attachments = c.id === 't_demo_launch' ? JSON.stringify([{ id: 'u_demo_launch', name: 'launch-checklist.md', mime: 'text/markdown', size: 1240, path: 'attachments/launch-checklist.md' }]) : null;
+      run(s.db, `INSERT INTO runs (id, task_id, agent, cwd, started_at, ended_at, status, prompt, answer, model, effort, route_reason, attachments_json, tool_calls, input_tokens, output_tokens)
+        VALUES (?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, c.id, agent, `data/workdirs/${c.id}`, iso(start), iso(start + 14_000),
+        side ? 'Give a read-only second opinion on Claude’s ClientEasy auth review.' : c.prompt,
+        answer, model, c.effort, routeReason, attachments, c.steps.length, side ? 8400 : 12480, side ? 340 : 760);
+      let ts = start;
+      const event = (kind: string, payload: Record<string, unknown>) => {
+        ts += 1000;
+        run(s.db, 'INSERT INTO run_events (run_id, ts, kind, payload_json) VALUES (?, ?, ?, ?)', id, iso(ts), kind, JSON.stringify(payload));
+      };
+      event('message', { role: 'reasoning', text: side ? 'I’ll check the session boundary and the proposed locking strategy independently.' : c.thinking });
+      c.steps.forEach((step, i) => {
+        const { output, ...call } = step;
+        event('tool_call', { id: `step_${i + 1}`, ...call });
+        event('tool_result', { id: `step_${i + 1}`, tool: step.tool, output });
+      });
+      event('message', { role: 'assistant', text: answer });
+    };
+    addRun(c.agent, c.model, c.answer, reason, at);
+    if (c.id === 't_demo_auth') {
+      addRun('codex', 'gpt-5.3-codex', 'I agree with the refresh-race finding. One caveat: **an in-memory lock only protects one server process**. If ClientEasy runs more than one worker, use a database transaction or a shared lock.\n\nFor the current single-process setup, the per-user lock and a parallel-request test are a reasonable fix.', 'side:second opinion:Codex checked Claude', at + 20_000, true);
+    }
+  }
 }
 
 /** Demo memory + skill proposals so the review flows have something real to show. */
@@ -342,7 +418,7 @@ function seedWorkspaces(s: Services, now: number): void {
   // Link the seeded analytics research task to its report.
   run(s.db, "UPDATE tasks SET output_path = 'Research/2026-11-01-privacy-analytics.md' WHERE title LIKE 'Compare Plausible%'");
 
-  if (s.env.runner !== 'mock') return;
+  if (s.env.runner !== 'mock' || process.env.JARVIS_SEED_REPOS === '0') return;
   try {
     const repo = join(s.env.dataDir, 'demo-repos', 'clienteasy');
     mkdirSync(join(repo, 'src', 'auth'), { recursive: true });

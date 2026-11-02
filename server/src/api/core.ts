@@ -74,17 +74,17 @@ export function registerCoreRoutes(app: Hono, s: Services): void {
   // ---- Tasks ---------------------------------------------------------------------------------
   app.get('/api/tasks', (c) => {
     const q = c.req.query();
-    return c.json({ tasks: s.tasks.list({ status: q.status, type: q.type, project: q.project, agent: q.agent, q: q.q, limit: q.limit ? Number(q.limit) : undefined }), counts: s.tasks.counts() });
+    return c.json({ tasks: s.tasks.list({ status: q.status, type: q.type, project: q.project, agent: q.agent, q: q.q, mode: q.mode, limit: q.limit ? Number(q.limit) : undefined }), counts: s.tasks.counts() });
   });
 
   app.post('/api/tasks/preview', async (c) => {
-    const b = await body<{ text?: string; agent_pref?: AgentPref }>(c);
+    const b = await body<{ text?: string; agent_pref?: AgentPref; mode?: 'chat' | 'task' }>(c);
     const text = (b.text ?? '').trim();
     if (!text) return c.json({ type: 'other', project: null, effort: 'medium', agent: null, reason: null, outward: false });
     const cls = s.tasks.preview(text);
     const project = cls.projectId ? get<Project>(s.db, 'SELECT id, name, kind FROM projects WHERE id = ?', cls.projectId) : null;
     const route = decide(
-      { agent_pref: b.agent_pref ?? 'auto', schedule_id: null, effort: cls.effort, type: cls.type, outward: cls.outward ? 1 : 0 },
+      { agent_pref: b.agent_pref ?? 'auto', schedule_id: null, effort: cls.effort, type: cls.type, outward: cls.outward ? 1 : 0, mode: b.mode === 'chat' ? 'chat' : 'task', title: text.split('\n')[0] },
       s.usage.current(),
       s.config.get().router,
     );
@@ -209,7 +209,6 @@ export function registerCoreRoutes(app: Hono, s: Services): void {
     return c.json({
       current: s.usage.current(),
       fallbackAtPercent: s.config.get().router.fallbackAtPercent,
-      softCaps: s.config.get().usage.claudeSoftCaps,
       daily: dailyTokens(s.db, days),
       byType: tokensByType(s.db, days),
       routing: routingLog(s.db),

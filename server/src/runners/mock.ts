@@ -204,6 +204,16 @@ function summaryFor(input: RunInput, toolCalls: number): string {
   }
 }
 
+/** A plausible conversational answer for the demo (chat runs). */
+function chatAnswer(input: RunInput): string {
+  const asked = input.prompt.split('New message from the owner:').pop()!.replace(/\[mock:[a-z]+\]/g, '').trim().split('\n')[0] ?? '';
+  const files = input.attachments?.length ? `\n\nI read the file you attached (${input.attachments.map((a) => a.name).join(', ')}) for this.` : '';
+  if (/\?$/.test(asked) || /^(what|how|why|which|should|can|is|are|do|does)\b/i.test(asked)) {
+    return `Short answer: **yes, with one caveat**.\n\n- Your notes already cover most of it (see *Projects/ClientEasy*).\n- The open risk is the token refresh race; a per-user lock fixes it.\n- If you want, I can turn this into a task and open a PR.${files}`;
+  }
+  return `Done. Here is what I found for “${asked.slice(0, 80)}”:\n\n1. Checked your notes and the last two related tasks.\n2. Nothing blocks it; the only decision left is the release date.\n3. Suggested next step: draft the email and I will wait for your OK before sending.${files}`;
+}
+
 export interface MockRunnerOptions {
   delayMs: number;
 }
@@ -237,7 +247,22 @@ export function createMockRunner(opts: MockRunnerOptions): AgentRunner {
         if (input.resumeSessionId) {
           sink.emit({ kind: 'status', payload: { status: 'resumed', detail: `Resumed session ${sessionId}` } });
         }
+        const chat = input.webSearch === true && scenario !== 'learn' && scenario !== 'cron' && scenario !== 'consult';
+        const stream = async (kind: 'text' | 'thinking', text: string) => {
+          const words = text.split(/(?<= )/);
+          const size = Math.max(1, Math.ceil(words.length / 6));
+          for (let i = 0; i < words.length; i += size) {
+            sink.live?.({ kind, text: words.slice(i, i + size).join('') });
+            await sleep(Math.max(1, Math.round(opts.delayMs / 4)));
+          }
+        };
         try {
+          if (chat) {
+            sink.live?.({ kind: 'reset' });
+            const thought = `The owner asks about "${firstLine(input.prompt).slice(0, 80)}". Check their notes for context first, then answer briefly and offer a next step.`;
+            await stream('thinking', thought);
+            sink.emit({ kind: 'message', payload: { role: 'reasoning', text: thought } });
+          }
           for (const step of steps) {
             await sleep(opts.delayMs);
             usage.inputTokens += 1800;
@@ -289,7 +314,11 @@ export function createMockRunner(opts: MockRunnerOptions): AgentRunner {
               sink.emit({ kind: 'message', payload: { role: 'assistant', text: `Noted: "${text}". I'll fold that in.` } });
             }
           }
-          const summary = scenario === 'learn' ? JSON.stringify(LEARNED_SKILL) : scenario === 'cron' ? '0 9 * * 1' : scenario === 'consult' ? 'Agree with the per-user lock. One gap: release the lock in a finally block so a thrown rotate() cannot wedge the user. Add a test for two concurrent refreshes.' : summaryFor(input, toolCalls);
+          const summary = scenario === 'learn' ? JSON.stringify(LEARNED_SKILL) : scenario === 'cron' ? '0 9 * * 1' : scenario === 'consult' ? 'Agree with the per-user lock. One gap: release the lock in a finally block so a thrown rotate() cannot wedge the user. Add a test for two concurrent refreshes.' : chat ? chatAnswer(input) : summaryFor(input, toolCalls);
+          if (chat) {
+            sink.live?.({ kind: 'reset' });
+            await stream('text', summary);
+          }
           if (scenario !== 'learn' && scenario !== 'cron' && scenario !== 'consult') sink.emit({ kind: 'message', payload: { role: 'assistant', text: summary } });
           usage.costUsd = Math.round(((usage.inputTokens * 3 + usage.outputTokens * 15) / 1e6) * 10000) / 10000;
           sink.emit({ kind: 'usage', payload: { ...usage } });

@@ -5,7 +5,7 @@ import { toast } from '../lib/toast.ts';
 import type { Approval, Task, UsageState } from '../lib/types.ts';
 import { voice } from './engine.ts';
 import { parseUtterance } from './intents.ts';
-import { toSpeech } from './speech.ts';
+import { answerToSpeech, toSpeech } from './speech.ts';
 
 const FOLLOW_UP_MS = 8000;
 const LEADER_KEY = 'jarvis.voice.leader';
@@ -35,6 +35,51 @@ export function startVoiceController(): () => void {
   let lastCreated: string | null = null;
   let pendingApproval: string | null = null;
   const titles = new Map<string, Task>();
+  const spokenChat = new Set<string>();
+  const finishedRuns = new Set<string>();
+  const active = new Map<string, { task: Promise<Task | undefined>; activity: string; answering: boolean; timer: number | null }>();
+  let lastCueAt = 0;
+  let disposed = false;
+
+  const track = (runId: string, taskId: string) => {
+    let run = active.get(runId);
+    if (!run) {
+      const cached = titles.get(taskId);
+      const task = cached?.mode ? Promise.resolve(cached) : api<{ task: Task }>(`/api/tasks/${taskId}`).then((r) => r.task).catch(() => undefined);
+      run = { task, activity: '', answering: false, timer: null };
+      active.set(runId, run);
+    }
+    return run;
+  };
+
+  const chatSpeech = (text: string, valid: () => boolean = () => true, windowMs = 0) => {
+    queue = queue.then(async () => {
+      if (disposed || !text || spokenChat.has(text) || !voice.state.prefs.enabled || !isLeader() || !valid()) return;
+      spokenChat.add(text);
+      await voice.speak(text);
+      if (windowMs && !disposed) openWindow(windowMs);
+    }).catch(() => undefined);
+  };
+
+  const cue = (runId: string, taskId: string, activity: string) => {
+    if (finishedRuns.has(runId)) return;
+    const run = track(runId, taskId);
+    run.activity = toSpeech(activity, 120);
+    run.answering = false;
+    if (run.timer !== null) return;
+    run.timer = window.setTimeout(() => {
+      run.timer = null;
+      void run.task.then((task) => {
+        if (task?.mode !== 'chat' || active.get(runId) !== run) return;
+        const text = run.activity;
+        chatSpeech(text, () => {
+          if (active.get(runId) !== run || run.answering || run.activity !== text || Date.now() - lastCueAt < 8000 || voice.state.awaiting || !['idle', 'listening'].includes(voice.state.status)) return false;
+          lastCueAt = Date.now();
+          return true;
+        });
+      });
+    }, Math.max(2000, lastCueAt + 8000 - Date.now()));
+  };
 
   const openWindow = (ms = FOLLOW_UP_MS) => {
     voice.setAwaiting(true);
@@ -111,6 +156,12 @@ export function startVoiceController(): () => void {
           await post(`/api/tasks/${lastCreated}/cancel`);
           return reply('Cancelled.');
         }
+        case 'conversation': {
+          const r = await post<{ conversation: Task }>('/api/conversations', { text: intent.text });
+          lastCreated = r.conversation.id;
+          navigate(`/c/${r.conversation.id}`);
+          return;
+        }
         case 'task': {
           const preview = await post<{ agent: string | null; type: string }>('/api/tasks/preview', { text: intent.text });
           const r = await post<{ task: Task }>('/api/tasks', { title: intent.text });
@@ -129,11 +180,33 @@ export function startVoiceController(): () => void {
     if (!voice.state.prefs.enabled || voice.state.status === 'off') return;
     const p = voice.state.prefs.speak;
     if (e.type === 'task.updated' && e.data?.id) titles.set(e.data.id, e.data as Task);
+    if (e.type === 'run.started' && e.data?.id) {
+      const route = String(e.data.route_reason ?? '');
+      if (route.startsWith('consult:') || route.startsWith('learning')) finishedRuns.add(e.data.id);
+      else track(e.data.id, e.data.task_id);
+    }
+    if (e.type === 'run.delta' && e.data?.kind === 'text' && e.data.text) {
+      const run = active.get(e.data.runId);
+      if (run) {
+        run.answering = true;
+        if (run.timer !== null) window.clearTimeout(run.timer);
+        run.timer = null;
+      }
+    }
+    if (e.type === 'run.event' && e.data?.kind === 'tool_call' && typeof e.data.payload?.activity === 'string' && p.finished) {
+      cue(e.data.run_id, e.data.taskId, e.data.payload.activity);
+    }
     if (e.type === 'approval.created' && p.approvals) {
       const a = e.data as Approval;
       pendingApproval = a.id;
       announce(`Approval needed. ${toSpeech(a.summary, 200)}. Say approve or reject.`, 20000);
     } else if (e.type === 'run.finished') {
+      const runId = String(e.data?.id ?? '');
+      if (finishedRuns.has(runId)) return;
+      finishedRuns.add(runId);
+      const tracked = active.get(runId);
+      if (tracked?.timer !== null && tracked?.timer !== undefined) window.clearTimeout(tracked.timer);
+      active.delete(runId);
       const route = String(e.data?.route_reason ?? '');
       if (route.startsWith('consult:') || route.startsWith('learning')) return;
       let t = titles.get(e.data?.task_id);
@@ -143,6 +216,15 @@ export function startVoiceController(): () => void {
         // keep cached
       }
       if (!t) return;
+      if (t.mode === 'chat') {
+        if (e.data?.status === 'done') {
+          lastFinished = { ...t, result_summary: e.data.answer ?? t.result_summary };
+          if (p.finished) chatSpeech(answerToSpeech(e.data.answer ?? ''), undefined, 6000);
+        } else if (e.data?.status === 'failed' && p.failed) {
+          announce(`${t.title} failed. ${toSpeech(e.data.error ?? '', 200)}`);
+        }
+        return;
+      }
       if (t.status === 'done') {
         lastFinished = t;
         const brief = /^Morning brief/.test(t.title);
@@ -165,7 +247,11 @@ export function startVoiceController(): () => void {
   };
   window.addEventListener('beforeunload', release);
   return () => {
+    disposed = true;
     unsub();
+    if (followTimer !== null) window.clearTimeout(followTimer);
+    for (const run of active.values()) if (run.timer !== null) window.clearTimeout(run.timer);
+    active.clear();
     window.clearInterval(heartbeat);
     window.removeEventListener('beforeunload', release);
     release();

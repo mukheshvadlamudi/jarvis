@@ -14,6 +14,11 @@ export const TOOL_DEFS: ToolDef[] = [
     inputSchema: { type: 'object', properties: { query: str('Words to search for'), type: { type: 'string', enum: ['project', 'person', 'area', 'research', 'journal', 'skill', 'core'], description: 'Optional note type filter' }, limit: { type: 'number', description: 'Max results (default 8)' } }, required: ['query'], additionalProperties: false },
   },
   {
+    name: 'search_conversations',
+    description: "Search the owner's past Ask conversations with Claude and Codex (what they asked and what was answered). Use it when the owner refers to something discussed before, e.g. \"like we said yesterday\".",
+    inputSchema: { type: 'object', properties: { query: str('Words to search for'), limit: { type: 'number', description: 'Max results (default 6)' } }, required: ['query'], additionalProperties: false },
+  },
+  {
     name: 'read_note',
     description: 'Read one vault note by its vault-relative path, e.g. "Projects/ClientEasy.md" or "Skills/release-notes/SKILL.md".',
     inputSchema: { type: 'object', properties: { path: str('Vault-relative path') }, required: ['path'], additionalProperties: false },

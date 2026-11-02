@@ -5,8 +5,9 @@ import { all, get, run } from '../db/index.ts';
 import type { EventBus } from '../events.ts';
 import { decide } from '../router/index.ts';
 import type { RunnerRegistry } from '../runners/index.ts';
+import { activityLine } from '../runners/activity.ts';
 import type { McpServerSpec, NormalizedEvent, RunEventSink, RunHandle, RunInput, RunResult } from '../runners/types.ts';
-import type { AgentId, Approval, Project, Run, StoredRunEvent, Task } from '../types.ts';
+import type { AgentId, Approval, Attachment, Effort, Project, Run, StoredRunEvent, Task } from '../types.ts';
 import type { UsageMeter } from '../usage/meter.ts';
 import { newId, nowIso } from '../util/ids.ts';
 import { logger } from '../util/log.ts';
@@ -14,9 +15,39 @@ import { capPayload } from '../util/truncate.ts';
 import type { ContextProvider } from './context.ts';
 import type { TaskService } from './service.ts';
 import { prepareWorkdir } from './workdir.ts';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import type { Workdir } from './workdir.ts';
 
 const log = logger('orchestrator');
+
+/** Per-message choices from the Ask composer. Omitted fields fall back to routing and Settings. */
+export interface AskOptions {
+  agent?: AgentId;
+  /** A model id the agent's CLI offers; 'default' or empty = the plan default. */
+  model?: string;
+  effort?: Effort;
+  /** Upload ids (see the uploads table). */
+  attachments?: string[];
+}
+
+interface StartOptions extends AskOptions {
+  prompt: string;
+  resumeSessionId?: string;
+  /** Overrides the route reason shown on the run. */
+  reason?: string;
+}
+
+/** Added to a conversation's context so agents answer like an assistant, not a batch job. */
+const CHAT_GUIDE = `
+
+## This is a live conversation
+The owner is chatting with you in Jarvis and sees your reply as you write it. Answer directly in Markdown and keep it as short as the question allows. For a simple question just answer; use tools (files, shell, web, the owner's notes through the jarvis tools) only when the request needs them. If you need something from the owner, ask one clear question.`;
+
+const ANSWER_CAP = 12_000;
+const HISTORY_CAP = 14_000;
+/** Marks the new message inside a prompt that also carries the conversation so far. */
+export const NEW_MESSAGE = '\n\n---\n\nNew message from the owner:\n';
 
 export interface RunFinishedContext {
   task: Task;
@@ -168,7 +199,7 @@ export class Orchestrator {
    * Send a follow-up. A live run that supports it gets the text directly; otherwise a new run
    * resumes the last session with the follow-up as its prompt.
    */
-  async followUp(taskId: string, text: string): Promise<{ mode: 'live' | 'resumed' | 'queued'; runId?: string }> {
+  async followUp(taskId: string, text: string, opts: AskOptions = {}): Promise<{ mode: 'live' | 'resumed' | 'queued'; runId?: string }> {
     const a = this.active.get(taskId);
     if (a?.handle.sendFollowUp) {
       await a.handle.sendFollowUp(text);
@@ -177,7 +208,9 @@ export class Orchestrator {
     if (a) throw new Error('this run cannot take follow-ups while active; wait for it to finish or stop it');
     const t = this.d.tasks.get(taskId);
     if (!t) throw new Error('not_found');
-    const last = get<Run>(this.d.db, 'SELECT * FROM runs WHERE task_id = ? ORDER BY started_at DESC LIMIT 1', taskId);
+    // Conversations answer at once: the owner is waiting, so they do not queue behind background tasks.
+    if (t.mode === 'chat') return this.ask(taskId, text, opts);
+    const last = this.lastRun(taskId);
     if (this.activeCount() >= this.d.config.get().maxConcurrentRuns) {
       // Fold the follow-up into the body and queue it; the next run picks it up.
       this.d.tasks.patch(taskId, { body: `${t.body ? `${t.body}\n\n` : ''}Follow-up: ${text}` });
@@ -198,6 +231,79 @@ export class Orchestrator {
     }
   }
 
+  /** The newest main run of a task (side runs such as second opinions are skipped). */
+  private lastRun(taskId: string): Run | undefined {
+    return get<Run>(
+      this.d.db,
+      `SELECT * FROM runs WHERE task_id = ? AND (route_reason IS NULL OR (route_reason NOT LIKE 'side:%' AND route_reason NOT LIKE 'consult:%' AND route_reason NOT LIKE 'learning%'))
+       ORDER BY started_at DESC LIMIT 1`,
+      taskId,
+    );
+  }
+
+  /**
+   * Send one message in a conversation and start answering now. The agent is the owner's pick, else
+   * the one that answered last (a follow-up stays put), else the router. Switching agents starts a
+   * fresh session that is handed the conversation so far.
+   */
+  async ask(taskId: string, text: string, opts: AskOptions = {}): Promise<{ mode: 'resumed'; runId?: string }> {
+    if (this.isActive(taskId)) throw new Error('Jarvis is still answering the last message; wait for it or stop it');
+    const t = this.d.tasks.get(taskId);
+    if (!t) throw new Error('not_found');
+    const last = this.lastRun(taskId);
+    const agent = opts.agent ?? (last?.agent as AgentId | undefined);
+    const same = !!last && last.agent === agent && !!last.session_id;
+    if (t.status !== 'queued') this.d.tasks.setStatus(taskId, 'queued', { not_before: null });
+    this.starting.add(taskId);
+    try {
+      const runId = await this.startRun(this.d.tasks.get(taskId)!, {
+        ...opts,
+        agent,
+        prompt: same || !last ? text : `${this.history(taskId)}${NEW_MESSAGE}${text}`,
+        resumeSessionId: same ? last!.session_id! : undefined,
+        reason: opts.agent ? `you chose ${opts.agent}` : last ? (same ? `follow-up stays with ${agent}` : `continues with ${agent}`) : undefined,
+      });
+      return { mode: 'resumed', runId: runId ?? undefined };
+    } finally {
+      this.starting.delete(taskId);
+    }
+  }
+
+  /** The conversation so far as plain text, for an agent joining it (newest kept when long). */
+  history(taskId: string): string {
+    const runs = all<Run>(this.d.db, "SELECT * FROM runs WHERE task_id = ? AND status = 'done' ORDER BY started_at", taskId);
+    const who = (r: Run) => {
+      const name = r.agent === 'claude' ? 'Claude' : r.agent === 'codex' ? 'Codex' : r.agent;
+      return r.route_reason?.startsWith('side:') ? `${name} (${r.route_reason.slice(5).split(':')[0]})` : name;
+    };
+    const turns: string[] = [];
+    for (const r of runs) {
+      const asked = (r.prompt ?? '').split(NEW_MESSAGE).pop()!.trim();
+      if (asked && !r.route_reason?.startsWith('side:')) turns.push(`Owner: ${asked}`);
+      if (r.answer) turns.push(`${who(r)}: ${r.answer}`);
+    }
+    let text = turns.join('\n\n');
+    if (text.length > HISTORY_CAP) text = `…${text.slice(-HISTORY_CAP)}`;
+    return `Earlier in this conversation (you are joining it; earlier replies may be from the other agent):\n\n${text}`;
+  }
+
+  /** Copy the chosen uploads into the run folder so the agent can open them like any file. */
+  private attach(ids: string[] | undefined, cwd: string): Attachment[] {
+    if (!ids?.length) return [];
+    const dir = join(cwd, 'attachments');
+    const out: Attachment[] = [];
+    for (const id of ids.slice(0, 10)) {
+      const u = get<{ id: string; name: string; mime: string; size: number; path: string }>(this.d.db, 'SELECT * FROM uploads WHERE id = ?', id);
+      if (!u || !existsSync(u.path)) continue;
+      mkdirSync(dir, { recursive: true });
+      let dest = join(dir, basename(u.name));
+      if (existsSync(dest)) dest = join(dir, `${id}-${basename(u.name)}`);
+      copyFileSync(u.path, dest);
+      out.push({ id: u.id, name: u.name, mime: u.mime, size: u.size, path: dest });
+    }
+    return out;
+  }
+
   private onOrphanDecision(a: Approval, decision: 'approved' | 'rejected', note: string | null): void {
     if (!a.task_id) return;
     const t = this.d.tasks.get(a.task_id);
@@ -210,13 +316,13 @@ export class Orchestrator {
     }
   }
 
-  private async startRun(task: Task, opts: { prompt: string; resumeSessionId?: string; agent?: AgentId }): Promise<string | null> {
+  private async startRun(task: Task, opts: StartOptions): Promise<string | null> {
     const cfg = this.d.config.get();
     let agent: AgentId;
     let reason: string;
-    if (opts.agent && opts.resumeSessionId) {
+    if (opts.agent && (opts.resumeSessionId || task.mode === 'chat')) {
       agent = opts.agent;
-      reason = `follow-up resumes ${agent} session`;
+      reason = opts.reason ?? `follow-up resumes ${agent} session`;
     } else {
       const decision = decide(task, this.d.usage.current(), cfg.router);
       if (decision.holdUntil) {
@@ -243,11 +349,15 @@ export class Orchestrator {
 
     const runId = newId('r');
     const startedAt = nowIso();
+    const attachments = this.attach(opts.attachments, workdir.cwd);
+    const effort = opts.effort ?? task.effort;
+    const model = opts.model && opts.model !== 'default' ? opts.model : cfg.agents[agent].model || undefined;
     run(
       this.d.db,
-      `INSERT INTO runs (id, task_id, agent, cwd, started_at, status, context_report_json, route_reason, prompt)
-       VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)`,
-      runId, task.id, agent, workdir.cwd, startedAt, JSON.stringify(ctx.report), reason, opts.prompt,
+      `INSERT INTO runs (id, task_id, agent, cwd, started_at, status, context_report_json, route_reason, prompt, model, effort, attachments_json)
+       VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)`,
+      runId, task.id, agent, workdir.cwd, startedAt, JSON.stringify(ctx.report), reason, opts.prompt, model ?? null, effort,
+      attachments.length ? JSON.stringify(attachments) : null,
     );
     this.d.tasks.setStatus(task.id, 'running', { agent, route_reason: reason, not_before: null });
     this.d.bus.publish('run.started', this.getRun(runId));
@@ -258,7 +368,7 @@ export class Orchestrator {
       agent,
       runId,
       prompt: opts.prompt,
-      contextPrefix: opts.resumeSessionId ? '' : ctx.prefix,
+      contextPrefix: opts.resumeSessionId ? '' : task.mode === 'chat' ? `${ctx.prefix}${CHAT_GUIDE}` : ctx.prefix,
       cwd: workdir.cwd,
       resumeSessionId: opts.resumeSessionId,
       sandbox: task.type === 'admin' || task.type === 'update' ? 'read-only' : 'workspace-write',
@@ -266,8 +376,11 @@ export class Orchestrator {
       taskType: task.type,
       vaultPath: this.d.vaultPath,
       mcpServers: this.mcpProvider?.(runId, task.id),
-      effort: cfg.agents[agent].effort[task.effort] || undefined,
-      model: cfg.agents[agent].model || undefined,
+      effort: cfg.agents[agent].effort[effort] || undefined,
+      model,
+      attachments,
+      // In a conversation either agent may look things up on the web when the question needs it.
+      ...(task.mode === 'chat' ? { webSearch: true } : {}),
     };
     for (const h of this.inputHooks) h(task, input);
 
@@ -283,20 +396,30 @@ export class Orchestrator {
    * A small follow-on run in an existing session that does not change the task's status (used by
    * the learning loop). Recorded as a run so its plan usage is visible. Approvals are refused.
    */
-  async sideRun(taskId: string, opts: { agent: AgentId; prompt: string; resumeSessionId: string | null; cwd: string; label: string }): Promise<RunResult> {
+  async sideRun(
+    taskId: string,
+    opts: { agent: AgentId; prompt: string; resumeSessionId: string | null; cwd: string; label: string; model?: string; effort?: Effort; contextPrefix?: string; webSearch?: boolean; attachments?: Attachment[] },
+  ): Promise<RunResult> {
     const task = this.d.tasks.get(taskId);
     if (!task) throw new Error('not_found');
+    const cfg = this.d.config.get();
     const runId = newId('r');
+    const model = opts.model && opts.model !== 'default' ? opts.model : cfg.agents[opts.agent].model || undefined;
     run(
       this.d.db,
-      `INSERT INTO runs (id, task_id, agent, cwd, started_at, status, route_reason, prompt) VALUES (?, ?, ?, ?, ?, 'running', ?, ?)`,
-      runId, taskId, opts.agent, opts.cwd, nowIso(), opts.label, opts.prompt,
+      `INSERT INTO runs (id, task_id, agent, cwd, started_at, status, route_reason, prompt, model, effort, attachments_json) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)`,
+      runId, taskId, opts.agent, opts.cwd, nowIso(), opts.label, opts.prompt, model ?? null, opts.effort ?? null, opts.attachments?.length ? JSON.stringify(opts.attachments) : null,
     );
+    this.d.bus.publish('run.started', this.getRun(runId));
     const base = this.makeSink(taskId, runId, opts.agent, true);
     const handle = this.d.runners.get(opts.agent).start(
       {
-        taskId, runId, prompt: opts.prompt, contextPrefix: '', cwd: opts.cwd, resumeSessionId: opts.resumeSessionId ?? undefined,
-        sandbox: 'read-only', allowNetwork: false, taskType: task.type, vaultPath: this.d.vaultPath,
+        taskId, runId, prompt: opts.prompt, contextPrefix: opts.contextPrefix ?? '', cwd: opts.cwd, resumeSessionId: opts.resumeSessionId ?? undefined,
+        sandbox: 'read-only', allowNetwork: !!opts.webSearch, webSearch: opts.webSearch, taskType: task.type, vaultPath: this.d.vaultPath,
+        mcpServers: opts.contextPrefix ? this.mcpProvider?.(runId, taskId) : undefined,
+        effort: opts.effort ? cfg.agents[opts.agent].effort[opts.effort] || undefined : undefined,
+        model,
+        attachments: opts.attachments,
       },
       base,
     );
@@ -304,8 +427,9 @@ export class Orchestrator {
     if (this.d.db.isOpen) {
       run(
         this.d.db,
-        `UPDATE runs SET status = ?, ended_at = ?, input_tokens = ?, output_tokens = ?, cached_tokens = ?, cost_estimate_usd = ?, error = ?, session_id = COALESCE(?, session_id) WHERE id = ?`,
-        result.status, nowIso(), result.usage.inputTokens, result.usage.outputTokens, result.usage.cachedTokens, result.usage.costUsd, result.error ?? null, result.sessionId ?? null, runId,
+        `UPDATE runs SET status = ?, ended_at = ?, input_tokens = ?, output_tokens = ?, cached_tokens = ?, cost_estimate_usd = ?, error = ?, session_id = COALESCE(?, session_id), answer = ? WHERE id = ?`,
+        result.status, nowIso(), result.usage.inputTokens, result.usage.outputTokens, result.usage.cachedTokens, result.usage.costUsd, result.error ?? null, result.sessionId ?? null,
+        result.status === 'done' ? result.summary.slice(0, ANSWER_CAP) : null, runId,
       );
       this.d.bus.publish('run.finished', this.getRun(runId));
     }
@@ -315,7 +439,10 @@ export class Orchestrator {
   /** Store a normalized event on a run and publish it live (also used by modules, e.g. consults). */
   recordEvent(taskId: string, runId: string, e: NormalizedEvent): void {
     if (!this.d.db.isOpen) return;
-    const payload = capPayload(e.payload);
+    const withActivity = e.kind === 'tool_call' && !e.payload.activity
+      ? { ...e.payload, activity: activityLine(String(e.payload.tool ?? ''), (e.payload.input ?? {}) as Record<string, unknown>) }
+      : e.payload;
+    const payload = capPayload(withActivity);
     const ts = nowIso();
     const r = run(this.d.db, 'INSERT INTO run_events (run_id, ts, kind, payload_json) VALUES (?, ?, ?, ?)', runId, ts, e.kind, JSON.stringify(payload));
     const stored: StoredRunEvent = { id: r.lastInsertRowid, run_id: runId, ts, kind: e.kind, payload_json: JSON.stringify(payload) };
@@ -344,6 +471,7 @@ export class Orchestrator {
         return d;
       },
       rateLimit: (reading) => this.d.usage.recordReading(reading),
+      live: (delta) => this.d.bus.publish('run.delta', { taskId, runId, ...delta }),
     };
   }
 
@@ -353,9 +481,9 @@ export class Orchestrator {
     run(
       this.d.db,
       `UPDATE runs SET status = ?, ended_at = ?, input_tokens = ?, output_tokens = ?, cached_tokens = ?, cost_estimate_usd = ?,
-       tool_calls = MAX(tool_calls, ?), error = ?, session_id = COALESCE(?, session_id) WHERE id = ?`,
+       tool_calls = MAX(tool_calls, ?), error = ?, session_id = COALESCE(?, session_id), answer = ? WHERE id = ?`,
       result.status, nowIso(), result.usage.inputTokens, result.usage.outputTokens, result.usage.cachedTokens, result.usage.costUsd,
-      result.toolCalls, result.error ?? null, result.sessionId ?? null, runId,
+      result.toolCalls, result.error ?? null, result.sessionId ?? null, result.status === 'done' ? result.summary.slice(0, ANSWER_CAP) : null, runId,
     );
     const t = this.d.tasks.get(taskId);
     if (t) {
@@ -384,6 +512,13 @@ export class Orchestrator {
       }
     }
     this.tick();
+  }
+
+  /** Context prefix for a side run that answers inside a conversation (same instructions as a main run). */
+  async chatPrefix(task: Task): Promise<string> {
+    const project = task.project_id ? get<Project>(this.d.db, 'SELECT * FROM projects WHERE id = ?', task.project_id) : undefined;
+    const ctx = await this.context.build(task, project);
+    return `${ctx.prefix}${CHAT_GUIDE}`;
   }
 
   getRun(id: string): Run | undefined {

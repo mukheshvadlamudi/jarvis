@@ -43,3 +43,10 @@ export function sentences(text: string): string[] {
   }
   return out.length ? out : [text];
 }
+
+/** Read a short answer without speaking Markdown syntax, code blocks or link addresses. */
+export function answerToSpeech(text: string): string {
+  const plain = toSpeech(text.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g, '').replace(/https?:\/\/\S+/g, ''), Number.MAX_SAFE_INTEGER);
+  const first = (plain.match(/[\s\S]+?(?:[.!?]+(?=\s|$)|$)/g) ?? []).slice(0, 3).join(' ').replace(/\s+/g, ' ').trim();
+  return toSpeech(first, 700);
+}

@@ -1,4 +1,5 @@
 import type { Services } from './app.ts';
+import { setupAgents } from './agents/service.ts';
 import { setupCollaboration } from './collab/index.ts';
 import { setupMcp } from './mcp/module.ts';
 import { setupMemory } from './memory/module.ts';
@@ -16,4 +17,5 @@ export function setupModules(s: Services): void {
   setupWorkspaces(s);
   setupTelegram(s);
   setupCollaboration(s);
+  setupAgents(s);
 }

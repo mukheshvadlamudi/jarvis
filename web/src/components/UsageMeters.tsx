@@ -5,7 +5,6 @@ import { AgentBadge, Skeleton, UsageBar } from './ui.tsx';
 export interface UsageResponse {
   current: UsageState;
   fallbackAtPercent: number;
-  softCaps: { fiveHourTokens: number; weeklyTokens: number };
   daily: Array<{ date: string; claude: number; codex: number }>;
   byType: Array<{ type: string; claude: number; codex: number; runs: number }>;
   routing: Array<{ run_id: string; task_id: string; title: string; type: string; agent: string; route_reason: string | null; started_at: string; status: string; tokens: number }>;

@@ -38,7 +38,7 @@ describe('claude runner (SDK mocked)', () => {
   it('builds plan-only options: no API keys, hooks, canUseTool, MCP, project settings', () => {
     const { s } = sink();
     const o = buildClaudeOptions(input, s, new AbortController(), dirtyEnv);
-    expect(o.env).toEqual({ PATH: '/bin', HOME: '/h', CLAUDE_AGENT_SDK_CLIENT_APP: 'jarvis/0.1' });
+    expect(o.env).toEqual({ PATH: '/bin', HOME: '/h', CLAUDE_AGENT_SDK_CLIENT_APP: 'jarvis/0.1', MCP_TIMEOUT: '8000' });
     expect(o.cwd).toBe('/work/t_1');
     expect(o.permissionMode).toBe('acceptEdits');
     expect(o.settingSources).toEqual(['user', 'project', 'local']);
