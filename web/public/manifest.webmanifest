@@ -4,8 +4,8 @@
   "description": "Personal command centre for Claude Code and Codex.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0E0F11",
-  "theme_color": "#0E0F11",
+  "background_color": "#05080D",
+  "theme_color": "#05080D",
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" },
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },

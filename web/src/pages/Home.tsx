@@ -2,6 +2,8 @@ import { ArrowRight, Clock3 } from 'lucide-react';
 import { useState } from 'react';
 import { ApprovalCard } from '../components/ApprovalCard.tsx';
 import { CommandBar } from '../components/CommandBar.tsx';
+import { Systems } from '../components/Systems.tsx';
+import { SetupBanner } from '../components/SetupBanner.tsx';
 import { UsageMeters } from '../components/UsageMeters.tsx';
 import { AgentBadge, Empty, ErrorBox, Link, SkeletonRows, StatusLabel } from '../components/ui.tsx';
 import { homeSections } from '../homeSections.ts';
@@ -43,14 +45,15 @@ export default function Home() {
 
   return (
     <div className="page">
-      <header className="page-head">
-        <h1>{greeting()}</h1>
-        <span className="sub">
-          {running.length ? `${running.length} running` : 'Nothing running'}
-          {queued.length ? ` · ${queued.length} queued` : ''}
-          {needsYouCount ? ` · ${needsYouCount} need${needsYouCount === 1 ? 's' : ''} you` : ''}
+      <header className="hero-greeting">
+        <span className="eyebrow">
+          {new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} · {running.length ? `${running.length} running` : 'all systems idle'}
+          {needsYouCount ? ` · ${needsYouCount} awaiting you` : ''}
         </span>
+        <h1>{greeting()}.</h1>
       </header>
+      <SetupBanner />
+      <Systems />
 
       <CommandBar />
 

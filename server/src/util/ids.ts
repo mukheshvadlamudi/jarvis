@@ -20,5 +20,8 @@ export function slugify(text: string, max = 40): string {
     .normalize('NFKD')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return slug.slice(0, max).replace(/-+$/g, '') || 'task';
+  if (slug.length <= max) return slug || 'task';
+  const cut = slug.slice(0, max + 1);
+  const at = cut.lastIndexOf('-');
+  return (at > max * 0.5 ? cut.slice(0, at) : slug.slice(0, max)).replace(/-+$/g, '') || 'task';
 }

@@ -25,6 +25,6 @@ Read `SPEC.md` first. It is the source of truth for what to build; this file is 
 - If the spec is ambiguous, pick the simplest option that keeps the constraints, and note it in `docs/decisions.md`.
 
 ## Don't
-- Don't add API-key based providers, OpenRouter, LangChain, vector stores, Docker, or Electron.
+- Don't add API-key based providers, OpenRouter, LangChain, vector stores, or Docker. Electron is allowed **only** as the thin desktop shell in `desktop/` (owner-approved); the server stays plain Node and the web UI must keep working in a normal browser.
 - Don't write to `~/.claude` or `~/.codex` except through the skills sync (which must support a dry-run target dir) and never touch their credential files.
 - Don't commit `.env`, `data/`, or anything from a real vault.

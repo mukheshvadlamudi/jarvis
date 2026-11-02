@@ -92,8 +92,8 @@ export function CommandBar({ autoFocus, onCreated, compact }: { autoFocus?: bool
 
   return (
     <div className="command">
-      <label htmlFor="command-input" className="sr-only">
-        Describe a task
+      <label htmlFor="command-input" className="command-label">
+        <span aria-hidden>›</span> Ask Jarvis
       </label>
       <textarea
         id="command-input"

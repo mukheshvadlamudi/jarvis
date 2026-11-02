@@ -1,0 +1,22 @@
+{
+  "name": "@jarvis/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Jarvis desktop app (Electron shell around the local Jarvis server)",
+  "type": "module",
+  "main": "main.mjs",
+  "author": {
+    "name": "Mukhesh",
+    "email": "noreply@users.noreply.github.com"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/lib.test.mjs"
+  },
+  "devDependencies": {
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0"
+  },
+  "homepage": "https://github.com/mukheshvadlamudi/jarvis",
+  "desktopName": "jarvis.desktop"
+}

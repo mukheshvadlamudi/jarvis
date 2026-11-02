@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node --watch --env-file-if-exists=../.env src/index.ts",
     "start": "node --env-file-if-exists=../.env src/index.ts",
-    "test": "JARVIS_RUNNER=mock vitest run",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit -p .",
     "smoke:claude": "node --env-file-if-exists=../.env scripts/smoke.ts claude",
     "smoke:codex": "node --env-file-if-exists=../.env scripts/smoke.ts codex"

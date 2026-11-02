@@ -4,3 +4,5 @@ data/
 .env
 .jarvis-worktrees/
 *.log
+build/
+dist-desktop/

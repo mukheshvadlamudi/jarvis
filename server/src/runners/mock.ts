@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AgentRunner, NormalizedEvent, RunEventSink, RunHandle, RunInput, RunResult } from './types.ts';
 import { emptyUsage } from './types.ts';
 import { classifyToolCall } from '../approvals/policy.ts';
@@ -8,6 +10,7 @@ type Step =
   | { do: 'tool'; tool: string; input: Record<string, unknown>; output: string; isError?: boolean }
   | { do: 'approval'; tool: string; input: Record<string, unknown>; kind: string; summary: string; reason: string }
   | { do: 'wait_followup' }
+  | { do: 'file'; path: string; content: string }
   | { do: 'fail'; message: string };
 
 export type MockScenario = 'success' | 'approval' | 'fail' | 'long' | 'tools';
@@ -103,7 +106,8 @@ function stepsFor(input: RunInput, scenario: MockScenario | 'learn' | 'cron'): S
       }
       steps.push({ do: 'tool', tool: 'WebFetch', input: { url: 'https://example.org/comparison' }, output: 'Fetched 14,212 characters' });
       steps.push(msg('Writing the report with a Sources section.'));
-      steps.push({ do: 'emit', event: { kind: 'file_change', payload: { path: 'report.md', kind: 'add', additions: 64, deletions: 0 } } });
+      steps.push({ do: 'file', path: 'report.md', content: mockReport(title) });
+      steps.push({ do: 'emit', event: { kind: 'file_change', payload: { path: 'report.md', kind: 'add', additions: 24, deletions: 0 } } });
       break;
     }
     case 'admin': {
@@ -130,6 +134,46 @@ function stepsFor(input: RunInput, scenario: MockScenario | 'learn' | 'cron'): S
     steps.push({ do: 'tool', tool: 'Bash', input: { command: `rg -n "TODO" src/module${i}.ts` }, output: `${Math.floor(rnd() * 5)} matches` });
   }
   return steps;
+}
+
+function mockReport(title: string): string {
+  const day = new Date().toISOString().slice(0, 10);
+  if (!/backup|postgres/i.test(title)) {
+    return `# ${title}
+
+**Answer:** the two strongest options are close; pick the first unless cost is the deciding factor.
+
+## Findings
+- Option A is the most mature and best documented.
+- Option B is cheaper and simpler, with fewer integrations.
+- Everything else surveyed was either abandoned or aimed at much larger teams.
+
+## Sources
+- Official documentation for each option (accessed ${day})
+- Two independent comparison articles from the last 12 months (accessed ${day})
+`;
+  }
+  return `# ${title}
+
+**Recommendation:** pgBackRest for a small VPS — incremental backups, parallel restore, S3-compatible storage, and a predictable ~50 MB memory footprint.
+
+## Options compared
+| Tool | Strength | Watch out for |
+|---|---|---|
+| pgBackRest | Fast parallel restore, retention policies | More config than the others |
+| WAL-G | Simple, cloud-native, low RAM | Fewer verification tools |
+| Barman | Mature, good docs | Wants a separate backup server |
+| Provider snapshots | Zero setup | Coarse restore points, vendor lock-in |
+
+## Notes
+- Test a restore monthly; a backup you have not restored is a hope, not a backup.
+- Keep 7 daily and 4 weekly full backups; WAL archiving gives point-in-time recovery between them.
+
+## Sources
+- pgBackRest user guide — pgbackrest.org/user-guide.html (accessed ${new Date().toISOString().slice(0, 10)})
+- WAL-G documentation — github.com/wal-g/wal-g (accessed ${new Date().toISOString().slice(0, 10)})
+- Barman documentation — docs.pgbarman.org (accessed ${new Date().toISOString().slice(0, 10)})
+`;
 }
 
 function summaryFor(input: RunInput, toolCalls: number): string {
@@ -218,6 +262,12 @@ export function createMockRunner(opts: MockRunnerOptions): AgentRunner {
               }
               const text = followUps.shift()!;
               sink.emit({ kind: 'message', payload: { role: 'assistant', text: `Got it: "${text}". Applying that now.` } });
+            } else if (step.do === 'file') {
+              try {
+                writeFileSync(join(input.cwd, step.path), step.content);
+              } catch {
+                // read-only or missing folder: the transcript still shows the change
+              }
             } else if (step.do === 'fail') {
               sink.emit({ kind: 'error', payload: { message: step.message } });
               return { status: 'failed', summary: step.message, error: step.message, sessionId, usage, toolCalls };

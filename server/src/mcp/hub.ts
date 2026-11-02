@@ -52,7 +52,8 @@ export class McpHub {
       jarvis: {
         command: process.execPath,
         args: [STDIO_PATH, '--run', runId],
-        env: { JARVIS_MCP_URL: this.url(), JARVIS_MCP_TOKEN: this.issue(runId, taskId) },
+        // Under the desktop app, process.execPath is Electron: make it behave as plain Node.
+        env: { JARVIS_MCP_URL: this.url(), JARVIS_MCP_TOKEN: this.issue(runId, taskId), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
       },
     };
   }

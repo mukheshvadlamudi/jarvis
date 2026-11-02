@@ -8,6 +8,11 @@ export async function pages() {
     { name: 'memory-health', path: '/memory?tab=health' },
     { name: 'skills', path: '/skills' },
     { name: 'schedules', path: '/schedules' },
+    { name: 'research', path: '/research' },
+    { name: 'updates', path: '/updates' },
+    { name: 'projects', path: '/projects' },
+    { name: 'people', path: '/people' },
+    { name: 'setup', path: '/setup' },
     { name: 'schedule-editor', path: '/schedules', click: 'text=New schedule' },
   ];
 }

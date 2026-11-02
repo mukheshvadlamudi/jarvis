@@ -2,15 +2,29 @@
   "name": "jarvis",
   "private": true,
   "type": "module",
-  "workspaces": ["server", "web"],
-  "engines": { "node": ">=24" },
+  "workspaces": [
+    "server",
+    "web",
+    "desktop"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "start": "npm run build -w web && npm run start -w server",
     "build": "npm run build -w web",
-    "test": "npm test -w server && npm test -w web",
+    "test": "npm test -w server && npm test -w web && npm test -w desktop",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "smoke:claude": "npm run smoke:claude -w server",
-    "smoke:codex": "npm run smoke:codex -w server"
+    "smoke:codex": "npm run smoke:codex -w server",
+    "app": "node scripts/jarvis.mjs",
+    "demo": "node scripts/jarvis.mjs --demo",
+    "login:claude": "node scripts/login.mjs claude",
+    "login:codex": "node scripts/login.mjs codex",
+    "desktop": "npm run build -w web && npm start -w desktop",
+    "package:win": "node scripts/package-desktop.mjs win",
+    "package:mac": "node scripts/package-desktop.mjs mac",
+    "package:linux": "node scripts/package-desktop.mjs linux"
   }
 }
