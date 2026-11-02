@@ -12,7 +12,9 @@ type Step =
 
 export type MockScenario = 'success' | 'approval' | 'fail' | 'long' | 'tools';
 
-export function pickScenario(prompt: string): MockScenario {
+export function pickScenario(prompt: string): MockScenario | 'learn' | 'cron' {
+  if (prompt.includes('[jarvis:learn]')) return 'learn';
+  if (prompt.includes('[jarvis:cron]')) return 'cron';
   const m = /\[mock:(success|approval|fail|long|tools)\]/.exec(prompt);
   if (m) return m[1] as MockScenario;
   return 'success';
@@ -33,7 +35,18 @@ function firstLine(prompt: string): string {
   return line.length > 90 ? `${line.slice(0, 87)}…` : line;
 }
 
-function stepsFor(input: RunInput, scenario: MockScenario): Step[] {
+const LEARNED_SKILL = {
+  skill: {
+    name: 'flaky-test-triage',
+    description: 'Find and fix flaky tests: reproduce with repeats, pin time and randomness, then fix the root cause.',
+    body: '# Flaky test triage\n\n1. Reproduce: run the test 30× (`npx vitest run <file> --repeat 30`).\n2. Pin time (fake timers, fixed TZ=UTC) and seeds; re-run.\n3. Look for shared state between tests and missing awaits.\n4. Fix the cause, not the symptom — no retries or longer timeouts.\n5. Add a regression note to the test explaining the cause.\n',
+    updates: null,
+  },
+};
+
+function stepsFor(input: RunInput, scenario: MockScenario | 'learn' | 'cron'): Step[] {
+  if (scenario === 'learn') return [msg(JSON.stringify(LEARNED_SKILL))];
+  if (scenario === 'cron') return [];
   const title = firstLine(input.prompt) || 'the task';
   const rnd = seeded(input.taskId + input.prompt);
   const steps: Step[] = [];
@@ -214,8 +227,8 @@ export function createMockRunner(opts: MockRunnerOptions): AgentRunner {
               sink.emit({ kind: 'message', payload: { role: 'assistant', text: `Noted: "${text}". I'll fold that in.` } });
             }
           }
-          const summary = summaryFor(input, toolCalls);
-          sink.emit({ kind: 'message', payload: { role: 'assistant', text: summary } });
+          const summary = scenario === 'learn' ? JSON.stringify(LEARNED_SKILL) : scenario === 'cron' ? '0 9 * * 1' : summaryFor(input, toolCalls);
+          if (scenario !== 'learn' && scenario !== 'cron') sink.emit({ kind: 'message', payload: { role: 'assistant', text: summary } });
           usage.costUsd = Math.round(((usage.inputTokens * 3 + usage.outputTokens * 15) / 1e6) * 10000) / 10000;
           sink.emit({ kind: 'usage', payload: { ...usage } });
           return { status: 'done', summary, sessionId, usage, toolCalls };

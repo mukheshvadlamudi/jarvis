@@ -57,6 +57,11 @@ export class ApprovalService {
     return { approval, decision };
   }
 
+  /** Stop waiting live; a later decision then goes through `onOrphanDecision` (session resume). */
+  detach(id: string): void {
+    this.waiters.delete(id);
+  }
+
   hasWaiter(id: string): boolean {
     return this.waiters.has(id);
   }

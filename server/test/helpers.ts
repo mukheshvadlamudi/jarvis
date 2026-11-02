@@ -56,6 +56,7 @@ export function makeCtx(opts: { mockDelayMs?: number; env?: Record<string, strin
     dir,
     req,
     close: async () => {
+      if (!s.db.isOpen) return;
       await s.orchestrator.shutdown();
       for (const c of s.closers) await c();
       s.db.close();

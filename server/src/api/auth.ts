@@ -13,7 +13,8 @@ function same(a: string, b: string): boolean {
  */
 export function authMiddleware(token: string | null): MiddlewareHandler {
   return async (c, next) => {
-    if (!token || c.req.path === '/api/health') return next();
+    // /api/mcp/call authenticates with its own per-run token.
+    if (!token || c.req.path === '/api/health' || c.req.path === '/api/mcp/call') return next();
     const header = c.req.header('authorization');
     const supplied = header?.startsWith('Bearer ') ? header.slice(7) : c.req.query('token') ?? '';
     if (!supplied || !same(supplied, token)) {
