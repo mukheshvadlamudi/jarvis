@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:" />
+<title>Jarvis</title>
+<style>
+  :root { color-scheme: dark light; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid; place-items: center; -webkit-app-region: drag; user-select: none;
+    font: 500 11px/1.4 ui-monospace, 'Cascadia Mono', Consolas, monospace; letter-spacing: .16em; text-transform: uppercase;
+    background: #05080d; color: #71869a;
+    background-image: linear-gradient(rgba(125,211,252,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(125,211,252,.035) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  @media (prefers-color-scheme: light) { body { background: #f4f7fa; color: #5d6e7f; background-image: none; } }
+  .wrap { display: grid; justify-items: center; gap: 20px; }
+  svg { width: 120px; height: 120px; }
+  .ring { transform-origin: 60px 60px; animation: spin 2.4s linear infinite; }
+  .ring2 { transform-origin: 60px 60px; animation: spin 7s linear infinite reverse; }
+  .core { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 50% { opacity: .55; } }
+  @media (prefers-reduced-motion: reduce) { .ring, .ring2, .core { animation: none; } }
+  b { color: #6fdcff; font-weight: 500; }
+  @media (prefers-color-scheme: light) { b { color: #076d96; } }
+</style>
+</head>
+<body>
+  <div class="wrap" role="status" aria-live="polite">
+    <svg viewBox="0 0 120 120" aria-hidden="true">
+      <circle cx="60" cy="60" r="56" fill="none" stroke="rgba(60,207,255,.25)" stroke-width="1" stroke-dasharray="2 6" class="ring2"/>
+      <circle cx="60" cy="60" r="44" fill="none" stroke="#3ccfff" stroke-width="3" stroke-dasharray="40 236" stroke-linecap="round" class="ring" style="filter: drop-shadow(0 0 6px #3ccfff)"/>
+      <circle cx="60" cy="60" r="32" fill="none" stroke="rgba(60,207,255,.35)" stroke-width="1"/>
+      <circle cx="60" cy="60" r="14" fill="#3ccfff" class="core" style="filter: drop-shadow(0 0 10px #3ccfff)"/>
+    </svg>
+    <div><b>Jarvis</b> · bringing systems online</div>
+  </div>
+</body>
+</html>

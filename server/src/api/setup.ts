@@ -106,6 +106,14 @@ export function registerSetupRoutes(app: Hono, s: Services): void {
     return c.json({ ok: true, reply: r.summary.slice(0, 200), tokens: r.usage.inputTokens + r.usage.outputTokens });
   });
 
+  // Graceful stop for the desktop app / launcher (finishes DB writes, stops cron and agents).
+  app.post('/api/shutdown', (c) => {
+    if (process.env.JARVIS_LAUNCHER !== '1') return bad(c, 'Only available when Jarvis is started by the launcher or desktop app.', 409);
+    const shutdown = s.modules.requestShutdown as ((code: number) => void) | undefined;
+    setTimeout(() => (shutdown ? shutdown(0) : process.exit(0)), 100).unref();
+    return c.json({ stopping: true });
+  });
+
   app.post('/api/setup/restart', (c) => {
     if (process.env.JARVIS_LAUNCHER !== '1') {
       return bad(c, 'Jarvis was not started by the launcher, so it cannot restart itself. Stop it and start it again (start-jarvis).', 409);

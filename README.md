@@ -11,7 +11,10 @@ See [SPEC.md](SPEC.md) for the design, [docs/DESIGN.md](docs/DESIGN.md) for the 
 
 Jarvis removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` and `CODEX_API_KEY` from every agent it starts, so usage always comes from your plans.
 
-## Run (one click)
+## Desktop app
+Download the installer for Windows, macOS or Linux from **Releases** (or the latest *Desktop app* Actions run) and open **Jarvis** — no Node install needed. It lives in the tray, sends native notifications for approvals, and `Ctrl+Shift+J` captures a task from anywhere. Run it from source with `npm run desktop`; build installers with `npm run package:win|mac|linux`. Details: [docs/INSTALL.md](docs/INSTALL.md).
+
+## Run (one click, from source)
 - **Windows:** double-click `start-jarvis.cmd` · **macOS:** `start-jarvis.command` · **Linux:** `./start-jarvis.sh`
 - Or `npm run app` (add `--demo`, or `npm run demo`, to try it without your plans).
 

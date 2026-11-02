@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Empty, ErrorBox, Link, PageHead, Skeleton, Spinner, TextInput } from '../components/ui.tsx';
 import { post } from '../lib/api.ts';
 import { useApi } from '../lib/hooks.ts';
+import { desktop } from '../lib/desktop.ts';
 import { installed, useInstallPrompt } from '../lib/install.ts';
 import { toast, toastError } from '../lib/toast.ts';
 
@@ -328,7 +329,20 @@ export default function Setup() {
                     {c.title} {!c.required ? <span className="faint" style={{ fontWeight: 400, fontSize: 12 }}>· optional</span> : null}
                   </h3>
                   <p>{c.detail}</p>
-                  {c.state !== 'ok' && c.fix ? c.fix.map((f) => <Cmd key={f} text={f} />) : null}
+                  {c.state !== 'ok' && desktop && (c.id === 'claude' || c.id === 'codex') ? (
+                    <button
+                      className="btn primary sm"
+                      style={{ marginTop: 10 }}
+                      onClick={async () => {
+                        const r = await desktop!.login(c.id as 'claude' | 'codex');
+                        toast(r.message, { kind: r.ok ? 'info' : 'error', ms: 9000 });
+                      }}
+                    >
+                      Log in to {c.id === 'claude' ? 'Claude' : 'Codex'}
+                    </button>
+                  ) : c.state !== 'ok' && c.fix ? (
+                    c.fix.map((f) => <Cmd key={f} text={f} />)
+                  ) : null}
                   {c.action === 'verify-claude' && c.state !== 'ok' ? <VerifyAction agent="claude" mock={d.runner === 'mock'} onDone={res.reload} /> : null}
                   {c.action === 'verify-codex' && c.state !== 'ok' ? <VerifyAction agent="codex" mock={d.runner === 'mock'} onDone={res.reload} /> : null}
                   {c.action === 'vault' && c.state !== 'ok' ? <VaultAction suggestions={d.suggestions.vaults} onSaved={res.reload} /> : null}
@@ -354,14 +368,22 @@ export default function Setup() {
       <div className="grid-2" style={{ marginTop: 24 }}>
         <section className="panel">
           <div className="panel-head">
-            <h2>Install as an app</h2>
+            <h2>{desktop ? 'Desktop app' : 'Install as an app'}</h2>
           </div>
           <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13 }}>
-            {installed() ? (
+            {desktop ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <p className="muted">You are in the Jarvis desktop app. Closing the window keeps Jarvis running in the tray so routines still fire; quit from the tray icon. Ctrl+Shift+J captures a task from anywhere.</p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="btn sm" onClick={() => void desktop!.openPath('data')}>Open data folder</button>
+                  <button className="btn sm ghost" onClick={() => void desktop!.openPath('logs')}>Open logs</button>
+                </div>
+              </div>
+            ) : installed() ? (
               <Empty title="Running as an installed app." />
             ) : (
               <>
-                <p className="muted">Jarvis installs from the browser as a desktop app: its own window, taskbar/dock icon and Start-menu entry — no Electron, almost no extra memory.</p>
+                <p className="muted">Lightest option: install Jarvis from the browser as an app — its own window, taskbar/dock icon and Start-menu entry. (There is also a full desktop app with tray and notifications; see Releases.)</p>
                 {available ? (
                   <button className="btn primary" style={{ alignSelf: 'flex-start' }} onClick={() => void install().then((ok) => ok && toast('Installed — find Jarvis in your Start menu or dock', { kind: 'success' }))}>
                     <Download size={14} strokeWidth={1.5} /> Install Jarvis
@@ -384,12 +406,13 @@ export default function Setup() {
           </div>
           <div className="panel-body" style={{ fontSize: 13 }}>
             <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }} className="muted">
-              <li>They install Node.js 24 (and Git).</li>
-              <li>They download the Jarvis folder (GitHub → Code → Download ZIP) and unzip it.</li>
               <li>
-                They double-click <code>start-jarvis.cmd</code> (Windows), <code>start-jarvis.command</code> (macOS) or run <code>./start-jarvis.sh</code>.
+                Easiest: send them the <strong>desktop installer</strong> (<code>Jarvis-Setup.exe</code>, <code>.dmg</code> or <code>.AppImage</code> from the project’s Releases). Nothing else to install except Git.
               </li>
-              <li>The launcher installs everything, asks them to log in to Claude and Codex with <em>their own</em> plans, and opens this page.</li>
+              <li>They open Jarvis, press “Log in to Claude / Codex” here with <em>their own</em> plans, and pick their vault and code folders.</li>
+              <li>
+                Or from source: install Node.js 24, download the folder, double-click <code>start-jarvis.cmd</code> / <code>.command</code> / <code>.sh</code>.
+              </li>
             </ol>
             <p className="faint" style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
               <Share2 size={14} strokeWidth={1.5} /> Each person uses their own logins, vault and data — nothing is shared.

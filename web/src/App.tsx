@@ -9,6 +9,7 @@ import { useApi } from './lib/hooks.ts';
 import { connectLive, disconnectLive, useLiveState } from './lib/live.ts';
 import { match, navigate, useLocation } from './lib/router.ts';
 import { toggleTheme } from './lib/theme.ts';
+import { desktop } from './lib/desktop.ts';
 import { routes } from './routes.ts';
 import type { PageProps, RouteDef } from './routes.ts';
 
@@ -115,6 +116,11 @@ export function App() {
 
   useEffect(() => onUnauthorized(() => setLocked(true)), []);
   useEffect(() => {
+    if (!desktop) return;
+    document.documentElement.classList.add('desktop', `desktop-${desktop.platform}`);
+    return desktop.onCapture(() => setCaptureOpen(true));
+  }, []);
+  useEffect(() => {
     if (locked) {
       disconnectLive();
       return;
@@ -193,6 +199,7 @@ export function App() {
 
   return (
     <div className="shell">
+      {desktop ? <div className="titlebar" aria-hidden /> : null}
       <a href="#main" className="sr-only" onFocus={(e) => e.currentTarget.classList.remove('sr-only')} onBlur={(e) => e.currentTarget.classList.add('sr-only')}>
         Skip to content
       </a>

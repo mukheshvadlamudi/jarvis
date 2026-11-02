@@ -433,3 +433,39 @@ body {
 .command textarea {
   padding-top: var(--s2);
 }
+
+/* ----- Desktop app (Electron) title strip ----- */
+.titlebar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 36px;
+  z-index: 70;
+  -webkit-app-region: drag;
+  app-region: drag;
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.desktop .shell {
+  padding-top: 36px;
+}
+.desktop .sidebar {
+  top: 36px;
+  height: calc(100vh - 36px);
+}
+.desktop .palette {
+  top: calc(14vh + 36px);
+}
+.desktop .sheet {
+  top: 36px;
+}
+.desktop .toasts {
+  bottom: var(--s4);
+}
+.desktop-darwin .titlebar {
+  padding-left: 80px;
+}
+@media (max-width: 767px) {
+  .desktop .sheet {
+    top: auto;
+  }
+}

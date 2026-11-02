@@ -1,6 +1,19 @@
 # Installing Jarvis (for you, or anyone you give it to)
 
-Jarvis is a **local app**: a small Node server on your computer plus a web interface you can install as a desktop/phone app (PWA). There is no cloud service and no shared account — each person runs their own copy with their own Claude and ChatGPT plans.
+Jarvis is a **local app**: a small server on your computer plus its interface. There is no cloud service and no shared account — each person runs their own copy with their own Claude and ChatGPT plans. Two ways to run it:
+
+## Option A — Desktop app (recommended)
+1. Download the installer for your system from the project's **Releases** page (or from the latest **Actions → Desktop app** run, under *Artifacts*):
+   - Windows: `Jarvis-Setup-x.y.z.exe` (or `Jarvis-Portable-x.y.z.exe`, no install)
+   - macOS: `Jarvis-x.y.z-arm64.dmg` (unsigned: first open with right-click → Open)
+   - Linux: `Jarvis-x.y.z-x86_64.AppImage` or `.deb`
+2. Install and open **Jarvis**. Nothing else is needed — Node and both agent CLIs are inside the app. Git is still needed for coding tasks.
+3. The **Setup** page opens: press **Log in to Claude** and **Log in to Codex** (a terminal window opens for each one-time login), verify both, choose your vault, find your code folders.
+4. Closing the window keeps Jarvis in the tray so routines keep running. `Ctrl+Shift+J` captures a task from anywhere. Tray → *Start at login* to have it always on.
+
+Desktop data lives in `%APPDATA%\Jarvis\data` (Windows), `~/Library/Application Support/Jarvis/data` (macOS) or `~/.config/Jarvis/data` (Linux).
+
+## Option B — From the source folder (launcher or browser app)
 
 ## What a person needs
 | Required | Why |
@@ -37,5 +50,8 @@ Download the new version over the old folder (keep `data/` and `.env`), then sta
 - Your vault stays where it is; Jarvis only writes through reviewed proposals (plus the daily log).
 - Logins stay in Claude Code's and Codex's own stores (`~/.claude`, `~/.codex`); Jarvis never reads them.
 
-## Why not Electron?
-The project rules exclude Electron: it would bundle a second Chromium (~200–300 MB RAM) on an 8 GB laptop. The installed PWA uses the browser you already have and gives the same app window. If a signed one-file installer is ever needed, a Tauri shell (uses the system WebView, ~10 MB) around the same server is the path that keeps the RAM budget.
+## Desktop app vs. browser app
+The desktop app (Electron) is the easiest to install and adds a tray, notifications and a global shortcut; it uses roughly 150–250 MB more RAM than running Jarvis in a browser tab or as an installed PWA. On a tight 8 GB machine, Option B with the PWA is the lightest.
+
+## Building the installers yourself
+`npm run package:win` (on Windows), `npm run package:mac` (on a Mac) or `npm run package:linux`. Output goes to `dist-desktop/`. Pushing a tag like `v0.2.0` makes GitHub Actions build all three and publish them as a Release.
