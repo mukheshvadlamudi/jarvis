@@ -3,6 +3,7 @@
 //   Windows: double-click start-jarvis.cmd   macOS: start-jarvis.command   Linux: ./start-jarvis.sh
 import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { ROOT, loggedIn } from './agent-env.mjs';
@@ -91,6 +92,25 @@ if (mode === 'real') {
 const port = envValue('JARVIS_PORT') ?? '4317';
 const url = `http://127.0.0.1:${port}`;
 let opened = false;
+
+// Double-clicking again while Jarvis runs should just bring it up, not crash on a busy port.
+const running = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1500) })
+  .then((r) => (r.ok ? r.json() : null))
+  .catch(() => null);
+if (running?.ok) {
+  say(`Jarvis is already running at ${url} (${running.runner} mode). Opening it.`);
+  openBrowser(url);
+  process.exit(0);
+}
+const busy = await new Promise((done) => {
+  const probe = createServer().once('error', () => done(true)).once('listening', () => probe.close(() => done(false)));
+  probe.listen(Number(port), '127.0.0.1');
+});
+if (busy) {
+  say(`Port ${port} is in use by another program, so Jarvis can't start.`);
+  say(`Close that program, or set JARVIS_PORT to a free port in .env, then start Jarvis again.`);
+  process.exit(1);
+}
 
 function start() {
   const env = { ...process.env, JARVIS_LAUNCHER: '1', ...(args.has('--demo') ? { JARVIS_RUNNER: 'mock' } : {}) };
