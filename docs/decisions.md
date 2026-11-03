@@ -81,3 +81,4 @@ Ambiguities in SPEC.md resolved with the simplest option that keeps the constrai
 51. **Claude usage comes from Claude Code's own /usage data** through a prompt-free SDK session, checked every five minutes and during runs. Transcript estimates and soft caps were removed.
 52. **Attachments are copied into the run folder.** Images, and PDFs on Claude, go inline; other files remain available in the folder.
 53. **Connectors use each agent's own CLI** (`claude mcp` / `codex mcp`), managed from the owner UI only.
+54. **Dropped voice transcriptions resolve with nothing, not ''.** Stalled, superseded or released Whisper requests are dropped silently so they don't show "Not sure what you meant" over the stall message. A speech segment that begins while Jarvis is talking doesn't stop it; only a transcribed real command does (echoes of the spoken line are dropped).
