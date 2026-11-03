@@ -32,7 +32,7 @@ describe('consult_agent', () => {
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/^Codex says:\nAgree with the per-user lock/);
     const runs = ctx.s.orchestrator.runsForTask(t.id);
-    expect(runs.find((x) => x.route_reason === 'consult: Claude asked Codex')).toMatchObject({ agent: 'codex', status: 'done' });
+    expect(runs.find((x) => x.route_reason === 'consult: Claude asked Codex')).toMatchObject({ agent: 'codex', status: 'done', purpose: 'consult', visibility: 'activity', parent_run_id: runId, owner_text: null });
     const events = ctx.s.orchestrator.events(runId).map((e) => JSON.parse(e.payload_json));
     expect(events.map((e) => e.phase)).toEqual(['asked', 'answered']);
     await call('consult_agent', { question: 'Second?' }, runId, token);
@@ -65,7 +65,7 @@ describe('handoffs', () => {
     expect(child.body).toContain('What Claude did');
     await waitFor(() => ctx.s.tasks.get(child.id)?.status === 'done');
     const childRun = ctx.s.orchestrator.runsForTask(child.id)[0];
-    expect(childRun).toMatchObject({ agent: 'codex', cwd: first.cwd });
+    expect(childRun).toMatchObject({ agent: 'codex', cwd: first.cwd, purpose: 'handoff', visibility: 'conversation', parent_run_id: first.id, owner_text: null });
     const links = await ctx.req('GET', `/api/tasks/${child.id}/links`);
     expect(links.json.origin).toMatchObject({ fromTask: id, mode: 'review', fromAgent: 'claude' });
     expect((await ctx.req('GET', `/api/tasks/${id}/links`)).json.children[0].id).toBe(child.id);

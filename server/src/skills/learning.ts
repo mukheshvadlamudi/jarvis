@@ -23,7 +23,7 @@ export interface SkillProposal {
 
 export function learnPrompt(existing: Array<{ name: string; description: string }>): string {
   return `[jarvis:learn] Jarvis learning step — do not use any tools.
-Look back at the work you just did in this session. If it contains a reusable procedure the owner will want again, write it as a skill. Prefer updating an existing skill over creating a near-duplicate.
+Review the completed work supplied below. If it contains a reusable procedure the owner will want again, write it as a skill. Prefer updating an existing skill over creating a near-duplicate.
 Existing skills:
 ${existing.map((s) => `- ${s.name}: ${s.description}`).join('\n') || '- (none)'}
 
@@ -54,8 +54,8 @@ export function parseSkillReply(text: string): { name: string; description: stri
 }
 
 /**
- * SPEC §10 learning loop. After a qualifying run (≥ minToolCalls), resume the same agent's session
- * with a small prompt asking for a reusable skill → `skill_proposals`. One learning step at a time.
+ * SPEC §10 learning loop. Qualifying work gets an isolated skill-proposal run so internal prompts
+ * never enter the owner's agent session. One learning step at a time.
  */
 export class LearningLoop {
   private db: Db;
@@ -75,7 +75,7 @@ export class LearningLoop {
 
   qualifies(ctx: RunFinishedContext): boolean {
     const c = this.cfg();
-    return c.enabled && ctx.result.status === 'done' && ctx.run.tool_calls >= c.minToolCalls && !!ctx.run.session_id && !(ctx.run.route_reason ?? '').startsWith('learning');
+    return c.enabled && ctx.result.status === 'done' && ctx.run.tool_calls >= c.minToolCalls && !!ctx.run.session_id && ctx.run.purpose !== 'learning' && ctx.run.visibility !== 'internal';
   }
 
   /** afterRun hook: queue a learning step for qualifying runs. */
@@ -91,9 +91,13 @@ export class LearningLoop {
   async learn(ctx: RunFinishedContext): Promise<SkillProposal | null> {
     const existing = this.registry.list().map((s) => ({ name: s.name, description: s.description }));
     const result = await this.orchestrator.sideRun(ctx.task.id, {
+      purpose: 'learning', parentRunId: ctx.run.id,
       agent: ctx.run.agent as AgentId,
-      prompt: learnPrompt(existing),
-      resumeSessionId: ctx.run.session_id,
+      prompt: `${learnPrompt(existing)}
+
+Work just completed:
+${ctx.result.summary}`,
+      resumeSessionId: null,
       cwd: ctx.run.cwd,
       label: 'learning loop: skill proposal',
     });

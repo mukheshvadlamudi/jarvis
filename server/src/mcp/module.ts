@@ -14,7 +14,9 @@ export function setupMcp(s: Services): McpHub {
   hub.vault = mem?.vault ?? null;
   hub.proposals = mem?.proposals ?? null;
   s.orchestrator.mcpProvider = (runId, taskId) => hub.spec(runId, taskId);
-  s.orchestrator.afterRun.push((ctx) => hub.revoke(ctx.run.id));
+  s.closers.push(s.bus.subscribe((e) => {
+    if (e.type === 'run.finished') hub.revoke((e.data as { id: string }).id);
+  }));
   s.modules.mcp = hub;
   return hub;
 }

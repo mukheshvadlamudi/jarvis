@@ -61,7 +61,7 @@ export function VoiceSettings() {
           Kokoro + Whisper, on this device · saved instantly
         </span>
       </div>
-      <Line label="Hands-free voice" hint="Jarvis listens for its name and speaks updates by itself. Nothing leaves this device and no credits are used.">
+      <Line label="Hands-free voice" hint="Jarvis listens for its name and speaks updates by itself. Speech is processed on this device; accepted commands go to your agents.">
         <VoiceToggle />
       </Line>
       <Line label="Microphone" hint={v.micLabel ? 'Using: ' + v.micLabel : 'Choose a microphone, then turn voice on to check its input'}>
@@ -80,6 +80,12 @@ export function VoiceSettings() {
         <button className="btn ghost sm" style={{ minHeight: 44 }} onClick={() => void allowMic()}>Allow microphone</button>
       </Line> : null}
       {micError || v.micFallback ? <Line label="Microphone status" hint={micError || v.micFallback}>{null}</Line> : null}
+      <Line label="Interruptions" hint={p.interruptions === 'speaker-safe' ? 'Speaker-safe: listening pauses during speech; press Space or Stop, then reply without the wake word' : 'Headset: keep listening and lower the output when you start speaking; use headphones'}>
+        <Segmented<VoicePrefs['interruptions']> label="Interruptions" value={p.interruptions} onChange={(interruptions) => voice.setPrefs({ interruptions })} options={[{ value: 'speaker-safe', label: 'Speaker-safe' }, { value: 'headset', label: 'Headset' }]} />
+      </Line>
+      <Line label="Turn detection" hint={p.turnDetection === 'smart' ? v.turnStatus : 'Simple timing: send after a short silence'}>
+        <Segmented<VoicePrefs['turnDetection']> label="Turn detection" value={p.turnDetection} onChange={(turnDetection) => voice.setPrefs({ turnDetection })} options={[{ value: 'smart', label: 'Smart' }, { value: 'simple', label: 'Simple' }]} />
+      </Line>
       <Line label="Mic sensitivity" hint="High detects quieter speech and shorter phrases">
         <Segmented<VoicePrefs['micSensitivity']> label="Mic sensitivity" value={p.micSensitivity} onChange={(micSensitivity) => voice.setPrefs({ micSensitivity })} options={[{ value: 'normal', label: 'Normal' }, { value: 'high', label: 'High' }]} />
       </Line>

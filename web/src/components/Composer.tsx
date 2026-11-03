@@ -1,4 +1,4 @@
-import { ArrowUp, FileText, Image as ImageIcon, Paperclip, Square, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, FileText, Image as ImageIcon, Paperclip, Square, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { AgentChoice, AgentStatus, EffortChoice, Uploaded } from '../lib/ask.ts';
 import { agentName, uploadFile } from '../lib/ask.ts';
@@ -8,6 +8,7 @@ import { useLocalState } from '../lib/hooks.ts';
 import { toastError } from '../lib/toast.ts';
 import type { AgentId } from '../lib/types.ts';
 import { MicButton } from './ui.tsx';
+import { Popover } from './ask/Popover.tsx';
 
 interface Pending {
   key: string;
@@ -57,11 +58,13 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
   const [sending, setSending] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [route, setRoute] = useState<string | null>(null);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsButton = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
 
   useEffect(
-    () =>
+    () => {
       handle?.({
         pick: (a) => {
           setAgent(a);
@@ -71,7 +74,8 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
           setText(t);
           box.current?.focus();
         },
-      }),
+      });
+    },
     [handle],
   );
 
@@ -93,7 +97,7 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
     const ctrl = new AbortController();
     const timer = window.setTimeout(() => {
       api<{ agent: AgentId | null; reason: string | null }>('/api/tasks/preview', { method: 'POST', body: { text: t, mode: 'chat' }, signal: ctrl.signal })
-        .then((p) => setRoute(p.agent ? `${agentName(p.agent)} · ${p.reason ?? ''}` : null))
+        .then((p) => setRoute(p.agent ? `Answers with ${agentName(p.agent)}` : null))
         .catch(() => undefined);
     }, 300);
     return () => {
@@ -116,10 +120,12 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
   const single = agent === 'claude' || agent === 'codex' ? agent : null;
   const modelFor = single ? models[single] ?? 'default' : 'default';
   const uploading = files.some((f) => !f.upload && !f.error);
+  const failed = files.some((f) => f.error);
 
-  const send = async () => {
+  const send = async (withoutFailed = false) => {
     const t = text.trim();
-    if (!t || sending || running || uploading) return;
+    if (!t || sending || running || uploading || (failed && !withoutFailed)) return;
+    if (withoutFailed) setFiles((cur) => cur.filter((f) => !f.error));
     setSending(true);
     const body = {
       text: t,
@@ -176,6 +182,7 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
           ))}
         </ul>
       ) : null}
+      {failed ? <div className="composer-upload-error" role="alert">An attachment could not upload. Remove it or <button disabled={!text.trim() || sending || running || uploading} onClick={() => void send(true)}>Send without it</button></div> : null}
       <label htmlFor="ask-input" className="sr-only">
         Message
       </label>
@@ -205,6 +212,10 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
         <button className="btn ghost sm icon" aria-label="Attach files" title="Attach files (or drop / paste them)" onClick={() => picker.current?.click()}>
           <Paperclip size={16} strokeWidth={1.5} />
         </button>
+        <button ref={optionsButton} className="btn ghost sm composer-options" aria-label="Answer options" aria-haspopup="dialog" aria-expanded={optionsOpen} onClick={() => setOptionsOpen(true)}>{AGENTS.find((a) => a.value === agent)?.label ?? 'Auto'}<ChevronDown size={14} strokeWidth={1.5} /></button>
+        {optionsOpen ? <Popover title="Answer options" anchor={optionsButton.current} onClose={() => setOptionsOpen(false)}>
+        <div className="composer-option-fields">
+        <label>Agent</label>
         <div className="segmented composer-agents" role="group" aria-label="Agent">
           {AGENTS.map((a) => (
             <button key={a.value} aria-pressed={agent === a.value} title={a.hint} onClick={() => setAgent(a.value)}>
@@ -214,7 +225,7 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
         </div>
         {single ? (
           <select className="select composer-select" aria-label={`${agentName(single)} model`} value={modelFor} onChange={(e) => setModels({ ...models, [single]: e.target.value })}>
-            {single === 'codex' ? <option value="default">Codex default</option> : null}
+            <option value="default">Default model</option>
             {modelOptions.map((m) => (
               <option key={m.value} value={m.value} title={m.description}>
                 {m.label}
@@ -229,6 +240,9 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
             </option>
           ))}
         </select>
+        <button className="btn" onClick={() => setOptionsOpen(false)}>Done</button>
+        </div>
+        </Popover> : null}
         <span className="composer-spacer" />
         <MicButton onText={(t) => setText((cur) => (cur ? `${cur} ${t}` : t))} />
         {running ? (
@@ -236,7 +250,7 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
             <Square size={14} strokeWidth={2} />
           </button>
         ) : (
-          <button className="btn primary sm icon composer-send" aria-label="Send" title="Send (Enter)" disabled={!text.trim() || sending || uploading} onClick={() => void send()}>
+          <button className="btn primary sm icon composer-send" aria-label="Send" title="Send (Enter)" disabled={!text.trim() || sending || uploading || failed} onClick={() => void send()}>
             <ArrowUp size={16} strokeWidth={2} />
           </button>
         )}

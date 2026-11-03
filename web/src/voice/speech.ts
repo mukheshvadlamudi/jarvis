@@ -13,6 +13,10 @@ export function toSpeech(text: string, maxChars = 700): string {
     .replace(/^\s*\d+[.)]\s+/gm, '')
     .replace(/[*_~>|]+/g, '')
     .replace(/([+−-])(\d+)/g, (_, sign: string, n: string) => `${sign === '+' ? 'plus' : 'minus'} ${n}`)
+    .replace(/(\d)[,](?=\d{3}\b)/g, '$1')
+    .replace(/(\d+(?:\.\d+)?)\s*(GB|MB|KB|GHz|MHz|km|kg|ms|cm)\b/g, (_, n: string, unit: string) => n + ' ' + ({ GB: 'gigabytes', MB: 'megabytes', KB: 'kilobytes', GHz: 'gigahertz', MHz: 'megahertz', km: 'kilometres', kg: 'kilograms', ms: 'milliseconds', cm: 'centimetres' }[unit] ?? unit))
+    .replace(/(\d+(?:\.\d+)?)%/g, '$1 percent')
+    .replace(/\$(\d+(?:\.\d+)?)/g, '$1 dollars')
     .replace(/\s*\n+\s*/g, '. ')
     .replace(/\.\s*\./g, '.')
     .replace(/\s{2,}/g, ' ')
@@ -49,4 +53,20 @@ export function answerToSpeech(text: string): string {
   const plain = toSpeech(text.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g, '').replace(/https?:\/\/\S+/g, ''), Number.MAX_SAFE_INTEGER);
   const first = (plain.match(/[\s\S]+?(?:[.!?]+(?=\s|$)|$)/g) ?? []).slice(0, 3).join(' ').replace(/\s+/g, ' ').trim();
   return toSpeech(first, 700);
+}
+
+/** Bound inference work; prefer punctuation, with a word boundary for unpunctuated prose. */
+export function synthesisChunks(text: string, limit = 180): string[] {
+  return sentences(text).flatMap((sentence) => {
+    const chunks: string[] = [];
+    let rest = sentence;
+    while (rest.length > limit) {
+      const head = rest.slice(0, limit + 1);
+      const clause = [...head.matchAll(/[,;:\u2014]\s/g)].at(-1)?.index;
+      const end = clause !== undefined && clause >= 24 ? clause + 1 : (head.lastIndexOf(' ') > 0 ? head.lastIndexOf(' ') : limit);
+      chunks.push(rest.slice(0, end).trim()); rest = rest.slice(end).trim();
+    }
+    if (rest) chunks.push(rest);
+    return chunks;
+  });
 }

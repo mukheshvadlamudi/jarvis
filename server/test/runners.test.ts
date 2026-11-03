@@ -139,7 +139,7 @@ describe('codex runner (SDK mocked)', () => {
     const { codex, thread } = buildCodexOptions({ ...input, sandbox: 'read-only', webSearch: true, allowNetwork: true }, dirtyEnv);
     expect(codex.env).toEqual({ PATH: '/bin', HOME: '/h' });
     expect(codex.apiKey).toBeUndefined();
-    expect(codex.config).toEqual({ mcp_servers: { jarvis: { command: 'node', args: ['mcp.ts', '--run', 'r_1'], env: { JARVIS_MCP_TOKEN: 'tok', OPENAI_API_KEY: 'leak' } } } });
+    expect(codex.config).toEqual({ mcp_servers: { jarvis: { command: 'node', args: ['mcp.ts', '--run', 'r_1'], env: { JARVIS_MCP_TOKEN: 'tok' }, enabled_tools: ['search_memory', 'search_conversations', 'read_note', 'list_projects', 'get_usage', 'save_memory', 'request_approval', 'consult_agent', 'handoff_to_agent', 'create_task'], default_tools_approval_mode: 'prompt', tools: Object.fromEntries(['search_memory', 'search_conversations', 'read_note', 'list_projects', 'get_usage', 'save_memory', 'request_approval', 'consult_agent', 'handoff_to_agent', 'create_task'].map((name) => [name, { approval_mode: 'approve' }])) } } });
     expect(thread).toMatchObject({ sandboxMode: 'read-only', approvalPolicy: 'never', skipGitRepoCheck: true, networkAccessEnabled: true, webSearchMode: 'live', workingDirectory: '/work/t_1' });
     expect(buildCodexOptions(input, {}).thread.sandboxMode).toBe('workspace-write');
   });

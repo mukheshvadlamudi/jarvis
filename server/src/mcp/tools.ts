@@ -1,5 +1,6 @@
 /** Jarvis MCP tool definitions (pure data — imported by the stdio bridge). */
 export interface ToolDef {
+  annotations: { readOnlyHint: boolean; destructiveHint: boolean; openWorldHint: boolean };
   name: string;
   description: string;
   inputSchema: { type: 'object'; properties: Record<string, unknown>; required?: string[]; additionalProperties?: boolean };
@@ -7,11 +8,13 @@ export interface ToolDef {
 
 const str = (description: string) => ({ type: 'string', description });
 
-export const TOOL_DEFS: ToolDef[] = [
+const READS = new Set(['search_memory', 'search_conversations', 'read_note', 'list_projects', 'get_usage']);
+
+const definitions: Omit<ToolDef, 'annotations'>[] = [
   {
     name: 'search_memory',
     description: "Full-text search of the owner's Obsidian vault (projects, people, research, journal). Returns paths, titles and snippets. Use before asking the owner anything about their work.",
-    inputSchema: { type: 'object', properties: { query: str('Words to search for'), type: { type: 'string', enum: ['project', 'person', 'area', 'research', 'journal', 'skill', 'core'], description: 'Optional note type filter' }, limit: { type: 'number', description: 'Max results (default 8)' } }, required: ['query'], additionalProperties: false },
+    inputSchema: { type: 'object', properties: { query: str('Words to search for'), type: { type: 'string', enum: ['project', 'person', 'area', 'research', 'journal', 'skill', 'core'], description: 'Optional note type filter' }, limit: { type: 'number', description: 'Max results (default 8)' }, history: { type: 'boolean', description: 'Also return superseded or retracted facts (default false: current facts only)' } }, required: ['query'], additionalProperties: false },
   },
   {
     name: 'search_conversations',
@@ -25,8 +28,25 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: 'save_memory',
-    description: 'Propose a change to the vault. mode "append" adds lines; "replace" supplies the full new note text. Daily-log, Inbox and Research appends apply immediately; CORE.md, Projects/, People/ and Areas/ changes wait for owner approval.',
-    inputSchema: { type: 'object', properties: { target: str('Vault-relative path of the note'), content: str('Text to append, or the full new note for replace'), reason: str('One line: why this should be remembered'), mode: { type: 'string', enum: ['append', 'replace'] } }, required: ['target', 'content', 'reason'], additionalProperties: false },
+    description: 'Remember something in the vault. Prefer a fact ({subject, predicate, value, op}) for stable preferences, decisions and status: "update" replaces the current value (the old one is kept with a validTo date), "retract" ends it, "noop" when already current. Otherwise give content + reason: mode "append" adds lines, "replace" supplies the full new note. Daily-log, Inbox and Research appends apply immediately; CORE.md, Projects/, People/ and Areas/ changes wait for owner approval.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: str('Vault-relative path of the note (optional for facts: defaults to the right note)'),
+        content: str('Text to append, or the full new note for replace (not needed with fact)'),
+        reason: str('One line: why this should be remembered (not needed with fact)'),
+        mode: { type: 'string', enum: ['append', 'replace'] },
+        fact: {
+          type: 'object',
+          description: 'A stable fact to add, update or retract',
+          properties: { subject: str('Who or what, e.g. "owner" or "Jarvis backups"'), predicate: str('The attribute, e.g. "prefers editor" or "stored in"'), value: str('The value'), op: { type: 'string', enum: ['add', 'update', 'retract', 'noop'] }, validFrom: str('YYYY-MM-DD when it became true, if known') },
+          required: ['subject', 'predicate', 'value', 'op'],
+          additionalProperties: false,
+        },
+        source: str('Where this came from, e.g. "owner said in chat"'),
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: 'request_approval',
@@ -69,3 +89,9 @@ export const TOOL_DEFS: ToolDef[] = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
 ];
+
+export const TOOL_DEFS: ToolDef[] = definitions.map((tool) => ({ ...tool, annotations: {
+  readOnlyHint: READS.has(tool.name),
+  destructiveHint: tool.name === 'save_memory' || tool.name === 'update_task_status',
+  openWorldHint: ['notify_owner', 'create_task', 'handoff_to_agent', 'request_approval'].includes(tool.name),
+} }));

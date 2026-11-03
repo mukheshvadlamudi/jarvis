@@ -54,11 +54,11 @@ export function registerConversationRoutes(app: Hono, s: Services): void {
   /** "Ask both": the other agent answers the same message beside the main answer (read-only). */
   const askOther = async (task: Task, mainAgent: AgentId, text: string, b: MessageBody, withHistory: boolean) => {
     const second = other(mainAgent);
-    const main = get<Run>(s.db, "SELECT * FROM runs WHERE task_id = ? AND route_reason NOT LIKE 'side:%' ORDER BY started_at DESC LIMIT 1", task.id);
+    const main = get<Run>(s.db, "SELECT * FROM runs WHERE task_id = ? AND purpose = 'user_reply' AND visibility = 'conversation' ORDER BY started_at DESC, rowid DESC LIMIT 1", task.id);
     const prompt = withHistory ? `${s.orchestrator.history(task.id)}\n\n---\n\nNew message from the owner:\n${text}` : text;
     void s.orchestrator
       .sideRun(task.id, {
-        agent: second, prompt, resumeSessionId: null, cwd: main?.cwd ?? join(s.env.dataDir, 'workdirs', task.id),
+        purpose: 'both', parentRunId: main?.id ?? null, agent: second, prompt, resumeSessionId: null, cwd: main?.cwd ?? join(s.env.dataDir, 'workdirs', task.id),
         label: `side:both:${label(second)} answered too`, effort: askOptions(b).effort, contextPrefix: await s.orchestrator.chatPrefix(task), webSearch: true,
         // The same files the main answer got (already copied into this folder).
         attachments: main?.attachments_json ? (JSON.parse(main.attachments_json) as Attachment[]) : undefined,
@@ -101,19 +101,22 @@ export function registerConversationRoutes(app: Hono, s: Services): void {
   app.get('/api/conversations', (c) => {
     const q = c.req.query('q')?.trim();
     const limit = Math.min(Number(c.req.query('limit') ?? 40), 200);
-    const tasks = s.tasks.list({ mode: 'chat', q: q || undefined, limit: 1000 })
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-      .slice(0, limit);
-    const lastAnswer = (id: string) => get<{ answer: string | null }>(s.db, 'SELECT answer FROM runs WHERE task_id = ? AND answer IS NOT NULL ORDER BY started_at DESC LIMIT 1', id)?.answer ?? null;
+    const tasks = all<Task>(s.db, `SELECT * FROM tasks t WHERE mode = 'chat' AND
+      (? = '' OR instr(lower(title), lower(?)) > 0 OR EXISTS (
+        SELECT 1 FROM runs r WHERE r.task_id = t.id AND visibility = 'conversation'
+        AND purpose IN ('user_reply', 'both', 'second_opinion', 'handoff')
+        AND (instr(lower(COALESCE(owner_text, '')), lower(?)) > 0 OR instr(lower(COALESCE(answer, '')), lower(?)) > 0)
+      )) ORDER BY updated_at DESC LIMIT ?`, q ?? '', q ?? '', q ?? '', q ?? '', limit);
+    const lastAnswer = (id: string) => get<{ answer: string | null }>(s.db, "SELECT answer FROM runs WHERE task_id = ? AND visibility = 'conversation' AND purpose IN ('user_reply', 'both', 'second_opinion', 'handoff') AND answer IS NOT NULL ORDER BY started_at DESC, rowid DESC LIMIT 1", id)?.answer ?? null;
     return c.json({
-      conversations: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status, agent: t.agent, updated_at: t.updated_at, preview: (lastAnswer(t.id) ?? t.result_summary ?? '').slice(0, 160) })),
+      conversations: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status, agent: t.agent, updated_at: t.updated_at, preview: (lastAnswer(t.id) ?? '').slice(0, 160) })),
     });
   });
 
   app.post('/api/conversations', async (c) => {
     const b = await body<MessageBody>(c);
-    const text = b.text?.trim();
-    if (!text) return bad(c, 'Type a message first.');
+    const text = b.text;
+    if (!text?.trim()) return bad(c, 'Type a message first.');
     const rest = text.split('\n');
     const t = s.tasks.create({
       title: titleOf(text),
@@ -135,22 +138,22 @@ export function registerConversationRoutes(app: Hono, s: Services): void {
   app.get('/api/conversations/:id', (c) => {
     const t = s.tasks.get(c.req.param('id'));
     if (!t) return bad(c, 'No conversation with that id.', 404);
-    const runs = all<Run>(s.db, 'SELECT * FROM runs WHERE task_id = ? ORDER BY started_at', t.id).map((r) => ({
+    const runs = all<Run>(s.db, "SELECT * FROM runs WHERE task_id = ? AND visibility != 'internal' ORDER BY started_at, rowid", t.id).map((r) => ({
       ...r,
       events: all<StoredRunEvent>(s.db, 'SELECT * FROM run_events WHERE run_id = ? ORDER BY id LIMIT ?', r.id, EVENTS_PER_RUN).map((e) => ({ ...e, payload: JSON.parse(e.payload_json) })),
     }));
     const approvals = all<Record<string, unknown>>(s.db, "SELECT * FROM approvals WHERE task_id = ? AND status = 'pending' ORDER BY created_at", t.id).map((a) => ({
       ...a, detail: JSON.parse(String(a.detail_json ?? '{}')), live: s.approvals.hasWaiter(String(a.id)),
     }));
-    return c.json({ conversation: t, runs, approvals, active: s.orchestrator.isActive(t.id) });
+    return c.json({ conversation: t, runs, approvals, active: s.orchestrator.isActive(t.id, false) });
   });
 
   app.post('/api/conversations/:id/messages', async (c) => {
     const t = s.tasks.get(c.req.param('id'));
     if (!t) return bad(c, 'No conversation with that id.', 404);
     const b = await body<MessageBody>(c);
-    const text = b.text?.trim();
-    if (!text) return bad(c, 'Type a message first.');
+    const text = b.text;
+    if (!text?.trim()) return bad(c, 'Type a message first.');
     try {
       const r = await send(t, text, b, false);
       return c.json({ ...r, conversation: s.tasks.get(t.id) });
@@ -165,14 +168,14 @@ export function registerConversationRoutes(app: Hono, s: Services): void {
     if (!t) return bad(c, 'No conversation with that id.', 404);
     const b = await body<{ runId?: string; effort?: Effort }>(c);
     const target = b.runId
-      ? get<Run>(s.db, 'SELECT * FROM runs WHERE id = ? AND task_id = ?', b.runId, t.id)
-      : get<Run>(s.db, "SELECT * FROM runs WHERE task_id = ? AND status = 'done' ORDER BY started_at DESC LIMIT 1", t.id);
+      ? get<Run>(s.db, "SELECT * FROM runs WHERE id = ? AND task_id = ? AND visibility = 'conversation'", b.runId, t.id)
+      : get<Run>(s.db, "SELECT * FROM runs WHERE task_id = ? AND status = 'done' AND visibility = 'conversation' AND purpose IN ('user_reply', 'both', 'second_opinion') ORDER BY started_at DESC, rowid DESC LIMIT 1", t.id);
     if (!target?.answer) return bad(c, 'There is no finished answer to check yet.', 409);
     const from = (target.agent === 'codex' ? 'codex' : 'claude') as AgentId;
     const to = other(from);
     const prompt = `${s.orchestrator.history(t.id)}\n\n---\n\nThe owner wants your second opinion on ${label(from)}'s last answer above. Check it for mistakes, gaps and risky advice. Start with a one-line verdict (agree, partly agree or disagree), then list concrete corrections, then give your own short answer only if it differs.`;
     void s.orchestrator
-      .sideRun(t.id, { agent: to, prompt, resumeSessionId: null, cwd: target.cwd, label: `side:second opinion:${label(to)} checked ${label(from)}`, effort: b.effort, contextPrefix: await s.orchestrator.chatPrefix(t), webSearch: true })
+      .sideRun(t.id, { purpose: 'second_opinion', parentRunId: target.id, agent: to, prompt, resumeSessionId: null, cwd: target.cwd, label: `side:second opinion:${label(to)} checked ${label(from)}`, effort: b.effort, contextPrefix: await s.orchestrator.chatPrefix(t), webSearch: true })
       .catch((err) => log.warn('second opinion failed', err));
     return c.json({ ok: true, agent: to });
   });

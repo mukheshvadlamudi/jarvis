@@ -265,6 +265,7 @@ export function seedIfEmpty(s: Services, now = Date.now()): boolean {
 /** Ask history uses the same stored events as live conversations. */
 function seedConversations(s: Services, now: number, projectIds: Record<string, string>): void {
   const iso = (ms: number) => new Date(ms).toISOString();
+  const typed = (s.db.prepare('PRAGMA table_info(runs)').all() as Array<{ name: string }>).some((c) => c.name === 'purpose');
   const conversations = [
     {
       id: 't_demo_auth', title: 'ClientEasy auth review', project: 'clienteasy', type: 'code' as const,
@@ -308,14 +309,16 @@ function seedConversations(s: Services, now: number, projectIds: Record<string, 
     run(s.db, `INSERT INTO tasks (id, title, body, type, status, project_id, agent_pref, agent, effort, mode, created_at, updated_at, result_summary, route_reason)
       VALUES (?, ?, ?, ?, 'done', ?, 'auto', ?, ?, 'chat', ?, ?, ?, ?)`,
       c.id, c.title, c.prompt, c.type, projectIds[c.project], c.agent, c.effort, iso(at), iso(at + 40_000), c.answer, reason);
-    const addRun = (agent: AgentId, model: string, answer: string, routeReason: string, start: number, side = false) => {
+    const addRun = (agent: AgentId, model: string, answer: string, routeReason: string, start: number, purpose = 'user_reply', parent: string | null = null) => {
       const id = newId('r');
+      const side = purpose !== 'user_reply';
       const attachments = c.id === 't_demo_launch' ? JSON.stringify([{ id: 'u_demo_launch', name: 'launch-checklist.md', mime: 'text/markdown', size: 1240, path: 'attachments/launch-checklist.md' }]) : null;
       run(s.db, `INSERT INTO runs (id, task_id, agent, cwd, started_at, ended_at, status, prompt, answer, model, effort, route_reason, attachments_json, tool_calls, input_tokens, output_tokens)
         VALUES (?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id, c.id, agent, `data/workdirs/${c.id}`, iso(start), iso(start + 14_000),
         side ? 'Give a read-only second opinion on Claude’s ClientEasy auth review.' : c.prompt,
         answer, model, c.effort, routeReason, attachments, c.steps.length, side ? 8400 : 12480, side ? 340 : 760);
+      if (typed) run(s.db, 'UPDATE runs SET purpose = ?, visibility = ?, owner_text = ?, parent_run_id = ? WHERE id = ?', purpose, purpose === 'consult' ? 'activity' : 'conversation', side ? null : c.prompt, parent, id);
       let ts = start;
       const event = (kind: string, payload: Record<string, unknown>) => {
         ts += 1000;
@@ -328,10 +331,13 @@ function seedConversations(s: Services, now: number, projectIds: Record<string, 
         event('tool_result', { id: `step_${i + 1}`, tool: step.tool, output });
       });
       event('message', { role: 'assistant', text: answer });
+      return id;
     };
-    addRun(c.agent, c.model, c.answer, reason, at);
+    const richAnswer = c.id === 't_demo_backups' ? `${c.answer}\n\n### Retention at a glance\n\n| Copy | Keep | Check |\n| :--- | ---: | :--- |\n| Daily | 14 copies | Encrypted upload |\n| Weekly | 8 copies | Restore to a separate database |\n\n### The backup path\n\n\`\`\`mermaid\nflowchart LR\n  A[Postgres] --> B[Encrypted backup]\n  B --> C[B2 storage]\n  C --> D[Restore check]\n\`\`\`\n\nThe restore check should verify the database before it is removed:\n\n\`\`\`sh\npg_restore --dbname=restore_check --exit-on-error nightly.dump\n\`\`\`` : c.answer;
+    const primary = addRun(c.agent, c.model, richAnswer, reason, at);
     if (c.id === 't_demo_auth') {
-      addRun('codex', 'gpt-5.3-codex', 'I agree with the refresh-race finding. One caveat: **an in-memory lock only protects one server process**. If ClientEasy runs more than one worker, use a database transaction or a shared lock.\n\nFor the current single-process setup, the per-user lock and a parallel-request test are a reasonable fix.', 'side:second opinion:Codex checked Claude', at + 20_000, true);
+      addRun('codex', 'gpt-5.3-codex', 'The API already checks workspace membership. I checked the protected routes independently; keep that boundary on the server.', 'consult:codex', at + 5000, 'consult', primary);
+      addRun('codex', 'gpt-5.3-codex', 'I agree with the refresh-race finding. One caveat: **an in-memory lock only protects one server process**. If ClientEasy runs more than one worker, use a database transaction or a shared lock.\n\nFor the current single-process setup, the per-user lock and a parallel-request test are a reasonable fix.', 'side:second opinion:Codex checked Claude', at + 20_000, 'second_opinion', primary);
     }
   }
 }

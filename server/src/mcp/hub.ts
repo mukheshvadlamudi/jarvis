@@ -74,22 +74,26 @@ export class McpHub {
     switch (tool) {
       case 'search_memory': {
         if (!this.vault) return { text: 'Memory is not available.', isError: true };
-        const hits = this.vault.search(str('query'), { limit: Number(args.limit ?? 8), type: str('type') || undefined });
+        const hits = this.vault.search(str('query'), { limit: Number(args.limit ?? 8), type: str('type') || undefined, history: args.history === true || /\bhistory\b/i.test(str('query')) });
         if (!hits.length) return { text: `No notes match "${str('query')}".` };
-        return { text: hits.map((h) => `${h.path} — ${h.title} (${h.tokens} tokens)\n  ${h.snippet.replace(/[\u0001\u0002]/g, '')}`).join('\n') };
+        return { text: hits.map((h) => `${h.path} — ${h.title} (${h.tokens} tokens; ${h.match}: ${h.matchedTerms.join(', ')})\n  ${h.snippet.replace(/[\u0001\u0002]/g, '')}${h.facts.map((f) => `\n  Fact ${f.id}: ${f.subject} / ${f.predicate} = ${f.value}; valid ${f.validFrom ?? 'unknown'} to ${f.validTo ?? 'open'}; source: ${f.source}${f.supersedes ? `; supersedes: ${f.supersedes}` : ''}`).join('')}`).join('\n') };
       }
       case 'search_conversations': {
         const q = `%${str('query').trim()}%`;
         if (q === '%%') return { text: 'Give a query.', isError: true };
         const rows = all<{ task_id: string; title: string; agent: string; started_at: string; prompt: string | null; answer: string | null }>(
           this.s.db,
-          `SELECT r.task_id, t.title, r.agent, r.started_at, r.prompt, r.answer FROM runs r JOIN tasks t ON t.id = r.task_id
-           WHERE t.mode = 'chat' AND r.task_id <> ? AND (t.title LIKE ? OR r.prompt LIKE ? OR r.answer LIKE ?)
+          `SELECT r.task_id, t.title, r.agent, r.started_at, r.owner_text AS prompt, r.answer FROM runs r JOIN tasks t ON t.id = r.task_id
+           WHERE t.mode = 'chat' AND r.task_id <> ? AND
+           CASE WHEN r.purpose IS NULL THEN
+             CASE WHEN r.route_reason LIKE 'consult:%' OR r.route_reason LIKE 'learning%' THEN 0 ELSE 1 END
+             ELSE r.visibility = 'conversation' END
+           AND (t.title LIKE ? OR r.owner_text LIKE ? OR r.answer LIKE ?)
            ORDER BY r.started_at DESC LIMIT ?`,
           ctx.taskId, q, q, q, Math.min(Number(args.limit ?? 6), 20),
         );
         if (!rows.length) return { text: `No past conversation mentions "${str('query')}".` };
-        const cut = (v: string | null, n: number) => (v ?? '').split('New message from the owner:\n').pop()!.replace(/\s+/g, ' ').trim().slice(0, n);
+        const cut = (v: string | null, n: number) => (v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
         return { text: rows.map((r) => `${r.started_at.slice(0, 10)} · ${r.title} (${r.agent})\n  Owner: ${cut(r.prompt, 200)}\n  Answer: ${cut(r.answer, 400)}`).join('\n\n') };
       }
       case 'read_note': {
@@ -100,6 +104,16 @@ export class McpHub {
       }
       case 'save_memory': {
         if (!this.proposals) return { text: 'Memory is not available.', isError: true };
+        if (args.fact !== undefined) {
+          if (!args.fact || typeof args.fact !== 'object' || Array.isArray(args.fact)) return { text: 'fact must contain subject, predicate, value and op.', isError: true };
+          const fact = args.fact as Record<string, unknown>;
+          if (typeof fact.subject !== 'string' || typeof fact.predicate !== 'string' || typeof fact.value !== 'string' || !['add', 'update', 'retract', 'noop'].includes(String(fact.op))) return { text: 'fact must contain subject, predicate, value and a valid op.', isError: true };
+          const p = this.proposals.proposeFact({ subject: fact.subject, predicate: fact.predicate, value: fact.value,
+            op: fact.op as 'add' | 'update' | 'retract' | 'noop', source: str('source') || `run:${ctx.runId}`,
+            validFrom: typeof fact.validFrom === 'string' ? fact.validFrom : undefined, target: str('target') || undefined, runId: ctx.runId });
+          return { text: p.status === 'noop' ? 'Fact already current; no change needed.' : p.status === 'rejected' ? 'The owner rejected this fact; it was not proposed again.' : p.status === 'applied' ? `Saved to ${p.target_path}.` : `Proposed a fact change to ${p.target_path} (id ${p.id}); the owner will review it.` };
+        }
+        if (!str('target').trim() || !str('content').trim()) return { text: 'Give target and content (or a fact).', isError: true };
         const p = this.proposals.propose({ target: str('target'), content: str('content'), reason: str('reason'), mode: args.mode === 'replace' ? 'replace' : 'append', runId: ctx.runId });
         return { text: p.status === 'applied' ? `Saved to ${p.target_path}.` : `Proposed a change to ${p.target_path} (id ${p.id}); the owner will review it. Continue with your task.` };
       }

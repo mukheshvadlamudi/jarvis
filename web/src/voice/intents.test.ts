@@ -41,3 +41,12 @@ describe('echo rejection', () => {
     expect(isEcho('backups run daily', '')).toBe(false);
   });
 });
+
+it('distinguishes speech, agent and microphone commands and a fresh conversation', () => {
+  const options = { requireWake: true, awaiting: false };
+  expect(parseUtterance('Jarvis stop speaking', options)).toEqual({ kind: 'stop' });
+  expect(parseUtterance('Jarvis stop agent', options)).toEqual({ kind: 'cancel' });
+  expect(parseUtterance('Jarvis mute microphone', options)).toEqual({ kind: 'mute' });
+  expect(parseUtterance('Jarvis new conversation.', options)).toEqual({ kind: 'conversation', text: '', fresh: true });
+  expect(parseUtterance('Jarvis new conversation: plan tomorrow', options)).toEqual({ kind: 'conversation', text: 'plan tomorrow', fresh: true });
+});

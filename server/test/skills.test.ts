@@ -68,6 +68,8 @@ describe('learning loop', () => {
     expect(props[0].name).toBe('flaky-test-triage');
     const runs = ctx.s.orchestrator.runsForTask(id);
     expect(runs[0].route_reason).toMatch(/learning loop/);
+    expect(runs[0]).toMatchObject({ purpose: 'learning', visibility: 'internal', owner_text: null, parent_run_id: runs[1].id });
+    expect(runs[0].session_id).not.toBe(runs[1].session_id);
     expect(ctx.s.tasks.get(id)?.status).toBe('done');
 
     const r = await ctx.req('POST', `/api/skills/proposals/${props[0].id}`, { decision: 'approved', description: 'Fix flaky tests properly.' });

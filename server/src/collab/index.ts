@@ -55,7 +55,7 @@ export class Collaboration {
   }
 
   consultsUsed(taskId: string): number {
-    return get<{ n: number }>(this.s.db, "SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND route_reason LIKE 'consult:%'", taskId)?.n ?? 0;
+    return get<{ n: number }>(this.s.db, "SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND purpose = 'consult'", taskId)?.n ?? 0;
   }
 
   async consult(ctx: { runId: string; taskId: string }, question: string, context = ''): Promise<{ ok: boolean; text: string }> {
@@ -75,6 +75,7 @@ export class Collaboration {
 
     this.s.orchestrator.recordEvent(ctx.taskId, ctx.runId, { kind: 'status', payload: { status: 'consult', phase: 'asked', from, to, question } });
     const r = await this.s.orchestrator.sideRun(ctx.taskId, {
+      purpose: 'consult', parentRunId: ctx.runId,
       agent: to,
       prompt: consultPrompt(from, question, context),
       resumeSessionId: null,
@@ -142,7 +143,7 @@ export class Collaboration {
     const t = this.s.tasks.get(taskId);
     if (!t) throw new Error('not_found');
     if (this.handoffDepth(t) >= MAX_HANDOFF_CHAIN) throw new Error(`Handoff limit reached (${MAX_HANDOFF_CHAIN} in a row). Start a new task to go further.`);
-    const last = get<Run>(this.s.db, "SELECT * FROM runs WHERE task_id = ? AND route_reason NOT LIKE 'consult:%' AND route_reason NOT LIKE 'learning%' ORDER BY started_at DESC LIMIT 1", taskId);
+    const last = get<Run>(this.s.db, "SELECT * FROM runs WHERE task_id = ? AND purpose IN ('user_reply', 'handoff') AND visibility = 'conversation' ORDER BY started_at DESC LIMIT 1", taskId);
     if (last && last.status !== 'running' && t.status === 'done') return { mode: 'now', task: this.createHandoff(t, last, spec) };
     this.s.tasks.patch(taskId, { then_json: JSON.stringify(spec) });
     return { mode: 'after' };
@@ -186,7 +187,7 @@ export function setupCollaboration(s: Services): Collaboration {
   s.orchestrator.afterRun.push((ctx) => {
     if (!s.config.get().collaboration.autoHandoffReview || ctx.result.status !== 'done') return;
     if (ctx.task.type !== 'code' || ctx.task.handoff_json || ctx.task.then_json) return;
-    if ((ctx.run.route_reason ?? '').startsWith('consult:') || (ctx.run.route_reason ?? '').startsWith('learning')) return;
+    if (ctx.run.purpose !== 'user_reply') return;
     try {
       c.createHandoff(ctx.task, ctx.run, { agent: 'other', mode: 'review' });
     } catch (err) {

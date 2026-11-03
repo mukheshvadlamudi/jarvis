@@ -2,9 +2,10 @@
 // Kokoro-82M text-to-speech, entirely on this device (WebGPU when available, otherwise WASM).
 import { modelProgress } from './loading.ts';
 import { KokoroTTS, env } from 'kokoro-js';
-import { sentences } from './speech.ts';
+import { synthesisChunks } from './speech.ts';
 
-type In = { type: 'load'; quality: 'best' | 'light' } | { type: 'speak'; id: number; text: string; voice: string; speed: number } | { type: 'cancel' } | { type: 'prewarm'; phrases: string[]; voice: string; speed: number };
+import type { VoiceToken } from './turn.ts';
+type In = Partial<VoiceToken> & ( { type: 'load'; quality: 'best' | 'light' } | { type: 'speak'; id: number; text: string; voice: string; speed: number } | { type: 'cancel'; cancelId?: number } | { type: 'prewarm'; phrases: string[]; voice: string; speed: number });
 
 let tts: KokoroTTS | null = null;
 let current = 0;
@@ -20,12 +21,15 @@ async function render(model: KokoroTTS, text: string, voice: string, speed: numb
   const hit = cache.get(k);
   if (hit) return { samples: hit.samples.slice(), rate: hit.rate };
   let audio;
+  post({ type: 'rendering' });
   try {
     audio = await model.generate(text, { voice: voice as never, speed });
   } catch (err) {
     if (device !== 'webgpu') throw err;
     model = await fallback(err);
     audio = await model.generate(text, { voice: voice as never, speed });
+  } finally {
+    post({ type: 'rendered' });
   }
   const out = { samples: audio.audio as Float32Array, rate: audio.sampling_rate };
   if (text.length <= 48) {
@@ -35,7 +39,8 @@ async function render(model: KokoroTTS, text: string, voice: string, speed: numb
   return out;
 }
 let loading: Promise<KokoroTTS> | null = null;
-const post = (m: unknown, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
+let workerToken: Partial<VoiceToken> = {};
+const post = (m: object, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage({ ...workerToken, ...m }, transfer);
 
 async function create(device: 'webgpu' | 'wasm', dtype: 'fp32' | 'q8') {
   const progress_callback = await modelProgress('onnx-community/Kokoro-82M-v1.0-ONNX',
@@ -102,12 +107,12 @@ async function handle(m: Exclude<In, { type: 'cancel' }>) {
     }
     if (current !== m.id) return;
     await load();
-    const chunks = sentences(m.text);
+    const chunks = synthesisChunks(m.text);
     for (const [i, chunk] of chunks.entries()) {
       if (current !== m.id) return; // superseded (barge-in or a newer reply)
       const { samples, rate } = await render(tts!, chunk, m.voice, m.speed);
       if (current !== m.id) return;
-      post({ type: 'audio', id: m.id, index: i, last: i === chunks.length - 1, samples, rate }, [samples.buffer]);
+      post({ turnId: m.turnId, speechEpoch: m.speechEpoch, generation: m.generation, type: 'audio', id: m.id, index: i, last: i === chunks.length - 1, samples, rate }, [samples.buffer]);
     }
     if (current === m.id) current = 0;
   } catch (err) {
@@ -119,7 +124,8 @@ async function handle(m: Exclude<In, { type: 'cancel' }>) {
 let queue: Promise<void> = Promise.resolve();
 self.onmessage = (e: MessageEvent<In>) => {
   const m = e.data;
-  if (m.type === 'cancel') { current = 0; return; }
+  if (m.generation !== undefined) workerToken = { generation: m.generation, speechEpoch: m.speechEpoch, turnId: m.turnId };
+  if (m.type === 'cancel') { current = 0; queue = queue.then(() => { post({ ...m, type: 'cancelled' }); }); return; }
   if (m.type === 'speak') current = m.id;
   queue = queue.then(() => handle(m));
 };

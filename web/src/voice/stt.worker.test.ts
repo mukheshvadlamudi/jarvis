@@ -39,4 +39,13 @@ describe('speech recognition worker backlog', () => {
     expect(worker.postMessage).toHaveBeenCalledWith({ type: 'text', id: 1, text: 'heard 1' });
     expect(mock.runs).toHaveLength(2);
   });
+
+  it('identifies inference start and the final result with the original turn and epoch', async () => {
+    const token = { turnId: 7, speechEpoch: 8, generation: 9 };
+    worker.onmessage({ data: { ...token, type: 'transcribe', id: 1, audio: new Float32Array([1]), model: 'whisper-base', language: 'en' } });
+    await vi.waitFor(() => expect(mock.runs).toHaveLength(1));
+    expect(worker.postMessage).toHaveBeenCalledWith({ ...token, type: 'started', id: 1 });
+    mock.runs[0].finish();
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledWith({ ...token, type: 'text', id: 1, text: 'heard 1' }));
+  });
 });

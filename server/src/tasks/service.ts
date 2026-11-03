@@ -135,7 +135,8 @@ export class TaskService {
     }
     if (f.q) {
       // Conversations are searchable by what was asked and answered, not only the title.
-      where.push('(title LIKE ? OR body LIKE ? OR id IN (SELECT task_id FROM runs WHERE prompt LIKE ? OR answer LIKE ?))');
+      // Internal runs (learning, maintenance) never make a conversation match.
+      where.push("(title LIKE ? OR body LIKE ? OR id IN (SELECT task_id FROM runs WHERE (visibility IS NULL OR visibility <> 'internal') AND (COALESCE(owner_text, prompt) LIKE ? OR answer LIKE ?)))");
       params.push(`%${f.q}%`, `%${f.q}%`, `%${f.q}%`, `%${f.q}%`);
     }
     const sql = `SELECT * FROM tasks ${where.length ? `WHERE ${where.join(' AND ')}` : ''}

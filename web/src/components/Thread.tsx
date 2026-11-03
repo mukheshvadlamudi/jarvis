@@ -1,10 +1,11 @@
 import { BookMarked, Check, ChevronDown, Copy, FileText, Globe, Image as ImageIcon, Repeat2, Scale, Search, Terminal, TriangleAlert, Wrench, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ConversationRun, LiveRun } from '../lib/ask.ts';
-import { agentName, askedText, otherAgent, sideLabel } from '../lib/ask.ts';
+import { agentName, askedText, otherAgent, runVisibility, sideLabel } from '../lib/ask.ts';
 import { post } from '../lib/api.ts';
 import { duration } from '../lib/format.ts';
-import { Markdown } from '../lib/markdown.tsx';
+import { plainText } from '../lib/markdown.tsx';
+import { Answer } from '../lib/answer.tsx';
 import { toast, toastError } from '../lib/toast.ts';
 import type { AgentId, Approval, ContextReport, RunEvent } from '../lib/types.ts';
 import { ApprovalCard } from './ApprovalCard.tsx';
@@ -54,17 +55,15 @@ export function digest(run: ConversationRun, live?: LiveRun) {
       files.push({ path: String(p.path ?? ''), additions: p.additions, deletions: p.deletions });
     } else if (ev.kind === 'error') {
       error = String(p.message ?? 'Something went wrong');
-    } else if (ev.kind === 'status' && p.status === 'consult') {
-      const line = p.phase === 'asked' ? `Asked ${agentName(p.to)}: ${String(p.question ?? '').slice(0, 90)}` : `${agentName(p.to)} answered`;
-      steps.push({ id: `consult-${ev.id}`, line, tool: 'consult', state: 'done' });
+      const step = byId.get(String(p.id ?? p.toolCallId));
+      if (step) step.state = 'error';
     }
   }
   const done = run.status !== 'running';
   // Text written between tool calls is narration ("Let me check your notes"); the last is the answer.
   const finalMsg = done ? assistant.at(-1) : undefined;
   for (const m of assistant) if (m !== finalMsg) narration.push({ at: m.id, text: String(m.payload.text ?? '') });
-  if (!done) for (const s of steps) if (s.state === 'running' && steps.indexOf(s) < steps.length - 1) s.state = 'done';
-  const answer = done ? run.answer ?? (finalMsg ? String(finalMsg.payload.text ?? '') : '') : live?.text ?? '';
+  const answer = done ? run.answer ?? (finalMsg ? String(finalMsg.payload.text ?? '') : '') : live?.text || run.answer || '';
   if (live?.thinking) thinking.push(live.thinking);
   return { steps, narration, thinking: thinking.join('\n\n').trim(), files, notes, error, answer, done };
 }
@@ -98,7 +97,7 @@ function Attachments({ run }: { run: ConversationRun }) {
   );
 }
 
-export function Turn({ run, live, approvals, conversationId, last, now, onAskOther, onDecided }: {
+export function Turn({ run, live, approvals, conversationId, last, now, onAskOther, onDecided, consults = [], liveRuns = {} }: {
   run: ConversationRun;
   live?: LiveRun;
   approvals: Approval[];
@@ -107,17 +106,21 @@ export function Turn({ run, live, approvals, conversationId, last, now, onAskOth
   now: number;
   onAskOther: (agent: AgentId) => void;
   onDecided: () => void;
+  consults?: ConversationRun[];
+  liveRuns?: Record<string, LiveRun>;
 }) {
   const d = digest(run, live);
   const side = sideLabel(run);
   const agent = (run.agent === 'codex' ? 'codex' : 'claude') as AgentId;
   const [open, setOpen] = useState<boolean | null>(null);
+  useEffect(() => { if (d.done) setOpen(null); }, [d.done]);
   const showWork = open ?? !d.done;
   const working = !d.done;
   const current = [...d.steps].reverse().find((s) => s.state === 'running');
   const took = run.ended_at ? duration(run.started_at, run.ended_at) : duration(run.started_at, null, now);
   const labels = contextLabels(run);
   const mine = approvals.filter((a) => a.run_id === run.id || (last && !a.run_id));
+  if (runVisibility(run) !== 'conversation') return null;
 
   const remember = async () => {
     try {
@@ -149,14 +152,11 @@ export function Turn({ run, live, approvals, conversationId, last, now, onAskOth
       <div className={`turn-agent agent-${agent}`}>
         <header className="turn-head">
           <span className={`dot${working ? ' live' : ''}`} style={{ color: `var(--agent-${agent})` }} />
-          <span className="turn-agent-name">{side ? side.text : agentName(agent)}</span>
-          {run.model ? <span className="turn-meta mono">{run.model}</span> : null}
-          {run.effort ? <span className="turn-meta">{run.effort} effort</span> : null}
-          {!side && run.route_reason ? <span className="turn-meta turn-reason" title={run.route_reason}>{run.route_reason}</span> : null}
+          <span className="turn-agent-name" tabIndex={0} title={[run.model, run.effort ? `${run.effort} effort` : '', run.route_reason].filter(Boolean).join(' · ')}>{side ? side.text : agentName(agent)}</span>
           <span className="turn-meta turn-time">{took}</span>
         </header>
 
-        {d.thinking || d.steps.length || d.narration.length ? (
+        {d.thinking || d.steps.length || d.narration.length || consults.length ? (
           <section className={`work${showWork ? ' open' : ''}`}>
             <button className="work-toggle" aria-expanded={showWork} onClick={() => setOpen(!showWork)}>
               {working ? <Spinner size={12} /> : <Check size={14} strokeWidth={1.5} />}
@@ -173,6 +173,11 @@ export function Turn({ run, live, approvals, conversationId, last, now, onAskOth
                 {d.narration.map((n) => (
                   <p key={n.at} className="work-narration">{n.text}</p>
                 ))}
+                {consults.filter((r) => runVisibility(r) === 'activity').map((r) => {
+                  const consult = digest(r, liveRuns[r.id]);
+                  const sentence = plainText(consult.answer).match(/^.*?[.!?](?:\s|$)|^.+$/)?.[0]?.trim() ?? 'Waiting for the answer';
+                  return <details className="work-consult" key={r.id}><summary>Asked {agentName(r.agent)} for a second opinion · {sentence}</summary><Answer source={consult.answer} streaming={!consult.done} /></details>;
+                })}
                 {d.steps.length ? (
                   <ol className="work-steps">
                     {d.steps.map((s) => {
@@ -197,7 +202,7 @@ export function Turn({ run, live, approvals, conversationId, last, now, onAskOth
 
         {d.answer ? (
           <div className={`turn-answer prose${working ? ' streaming' : ''}`}>
-            <Markdown source={d.answer} />
+            <Answer source={d.answer} streaming={working} />
           </div>
         ) : null}
         {run.status === 'failed' ? (

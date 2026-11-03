@@ -18,9 +18,12 @@ function send(msg: unknown): void {
 }
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
+  const timeoutMs = name === 'request_approval' || name === 'consult_agent' ? 600_000 : 30_000;
+  const signal = AbortSignal.timeout(timeoutMs);
   try {
     const res = await fetch(`${URL_BASE}/api/mcp/call`, {
       method: 'POST',
+      signal,
       headers: { 'content-type': 'application/json', 'x-jarvis-run': RUN_ID, 'x-jarvis-mcp-token': TOKEN },
       body: JSON.stringify({ tool: name, args }),
     });
@@ -28,6 +31,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<{ 
     if (!res.ok) return { content: [{ type: 'text', text: data.message ?? `Jarvis returned ${res.status}` }], isError: true };
     return { content: [{ type: 'text', text: data.text ?? '' }], isError: data.isError === true };
   } catch (err) {
+    if (signal.aborted) return { content: [{ type: 'text', text: `Jarvis tool ${name} timed out after ${timeoutMs / 1000} seconds. Check the run or approval before retrying; the action may still be pending.` }], isError: true };
     return { content: [{ type: 'text', text: `Jarvis is not reachable: ${(err as Error).message}` }], isError: true };
   }
 }

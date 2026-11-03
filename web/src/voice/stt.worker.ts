@@ -3,12 +3,15 @@
 import { modelProgress } from './loading.ts';
 import { env, pipeline } from '@huggingface/transformers';
 
-type In = { type: 'load'; model: string } | { type: 'transcribe'; id: number; audio: Float32Array; language: string; model: string };
+import type { VoiceToken } from './turn.ts';
+type In = Partial<VoiceToken> & ( { type: 'load'; model: string } | { type: 'transcribe'; id: number; audio: Float32Array; language: string; model: string });
 type Asr = ((audio: Float32Array, opts: Record<string, unknown>) => Promise<{ text: string } | Array<{ text: string }>>) & { dispose: () => Promise<void> };
 
+function stamp(m: Partial<VoiceToken>) { return m.generation === undefined ? {} : { turnId: m.turnId, speechEpoch: m.speechEpoch, generation: m.generation }; }
 let asr: Asr | null = null;
 let current = '';
-const post = (m: unknown) => (self as unknown as Worker).postMessage(m);
+let workerToken: Partial<VoiceToken> = {};
+const post = (m: object) => (self as unknown as Worker).postMessage({ ...workerToken, ...m });
 
 async function load(model: string): Promise<Asr> {
   if (asr && current === model) return asr;
@@ -39,11 +42,12 @@ async function handle(m: In) {
       return;
     }
     const run = await load(m.model);
+    post({ ...stamp(m), type: 'started', id: m.id });
     const out = await run(m.audio, { language: m.language === 'auto' ? null : m.language, task: 'transcribe', chunk_length_s: 30 });
     const text = (Array.isArray(out) ? out.map((o) => o.text).join(' ') : out.text).trim();
-    post({ type: 'text', id: m.id, text });
+    post({ ...stamp(m), type: 'text', id: m.id, text });
   } catch (err) {
-    post({ type: 'error', what: 'ears', id: 'id' in m ? m.id : null, message: (err as Error).message });
+    post({ ...stamp(m), type: 'error', what: 'ears', id: 'id' in m ? m.id : null, message: (err as Error).message });
   }
 }
 /**
@@ -60,10 +64,11 @@ async function pump() {
 }
 self.onmessage = (e: MessageEvent<In>) => {
   const m = e.data;
+  if (m.generation !== undefined) workerToken = { generation: m.generation, speechEpoch: m.speechEpoch, turnId: m.turnId };
   if (m.type === 'transcribe') {
     const i = pending.findIndex((p) => p.type === 'transcribe');
     if (i >= 0) {
-      post({ type: 'superseded', id: (pending[i] as { id: number }).id });
+      post({ ...stamp(pending[i]), type: 'superseded', id: (pending[i] as { id: number }).id });
       pending.splice(i, 1);
     }
   }

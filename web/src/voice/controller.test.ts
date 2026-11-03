@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
     state: { status: 'listening', awaiting: false, said: '', prefs: { enabled: true, wakeWord: true, speak: { finished: true, failed: true, approvals: true, brief: true, notify: true, confirmations: true } } },
     onUseHeard: null as ((text: string) => Promise<void>) | null,
     feedback: vi.fn(),
+    speechEpoch: 0, muteMic: vi.fn(),
+    onTurnStart: null as (() => void) | null,
+    onStopSpeaking: null as (() => void) | null, onStopAgent: null as (() => void) | null,
     onUtterance: null as ((text: string) => Promise<void>) | null,
     speak: vi.fn(async (_text: string) => {}), start: vi.fn(), stop: vi.fn(), stopSpeaking: vi.fn(), setPrefs: vi.fn(), setAwaiting: vi.fn(),
   },
@@ -87,7 +90,7 @@ describe('Ask voice controller', () => {
     await finish('Backups run daily.');
     await finish('Backups run daily.', 'another-run');
     await vi.advanceTimersByTimeAsync(0);
-    expect(mocks.voice.speak).toHaveBeenCalledTimes(3);
+    expect(mocks.voice.speak).toHaveBeenCalledTimes(4);
   });
 
   it('keeps background completion, approvals and the morning brief', async () => {
@@ -123,6 +126,88 @@ describe('Ask voice controller', () => {
     await finish('Backups run daily.');
     await vi.advanceTimersByTimeAsync(0);
     expect(mocks.voice.speak).toHaveBeenCalledExactlyOnceWith('Backups run daily.');
+  });
+
+  it('keeps follow-ups in the active conversation until ten minutes idle or an explicit new conversation', async () => {
+    vi.stubGlobal('location', { pathname: '/c/current' });
+    await mocks.voice.onUtterance?.('Jarvis, what did you find?');
+    expect(mocks.post).toHaveBeenLastCalledWith('/api/conversations/current/messages', { text: 'what did you find?' });
+    await mocks.voice.onUtterance?.('Jarvis, research that further');
+    expect(mocks.post).toHaveBeenLastCalledWith('/api/conversations/current/messages', { text: 'research that further' });
+    await vi.advanceTimersByTimeAsync(600001);
+    await mocks.voice.onUtterance?.('Jarvis, what now?');
+    expect(mocks.post).toHaveBeenLastCalledWith('/api/conversations', { text: 'what now?' });
+    await mocks.voice.onUtterance?.('Jarvis, new conversation: plan tomorrow');
+    expect(mocks.post).toHaveBeenLastCalledWith('/api/conversations', { text: 'plan tomorrow' });
+  });
+
+  it('acknowledges a task before preview returns and suppresses a stopped pending submission', async () => {
+    let resolve: (value: unknown) => void = () => {};
+    mocks.post.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const pending = mocks.voice.onUtterance?.('Jarvis research backup tools');
+    expect(mocks.voice.speak).toHaveBeenCalledWith('On it.');
+    mocks.voice.onStopSpeaking?.();
+    resolve({ agent: 'claude', type: 'research' }); await pending;
+    expect(mocks.post).not.toHaveBeenCalledWith('/api/tasks', expect.anything());
+  });
+
+  it('does not reopen a follow-up or play queued announcements from an obsolete epoch', async () => {
+    let resolve: () => void = () => {};
+    mocks.voice.speak.mockImplementationOnce(() => new Promise<void>((done) => { resolve = done; }));
+    await mocks.voice.onUtterance?.('Jarvis');
+    await emit('notify', { message: 'Obsolete announcement' });
+    mocks.voice.onStopSpeaking?.(); mocks.voice.setAwaiting.mockClear(); resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.voice.speak).not.toHaveBeenCalledWith('Obsolete announcement');
+    expect(mocks.voice.setAwaiting).not.toHaveBeenCalledWith(true);
+  });
+
+  it('distinguishes mute mic, stop speaking and stop agent', async () => {
+    await mocks.voice.onUtterance?.('Jarvis mute');
+    expect(mocks.voice.muteMic).toHaveBeenCalledOnce(); expect(mocks.voice.stop).not.toHaveBeenCalled();
+    await mocks.voice.onUtterance?.('Jarvis stop'); expect(mocks.voice.stopSpeaking).toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+    await mocks.voice.onUtterance?.('Jarvis ask what now?');
+    await mocks.voice.onUtterance?.('Jarvis stop agent');
+    expect(mocks.post).toHaveBeenCalledWith('/api/tasks/chat/cancel');
+  });
+
+  it('uses Space to stop speech, excluding typing fields', () => {
+    const keydown = (window.addEventListener as ReturnType<typeof vi.fn>).mock.calls.find(([name]) => name === 'keydown')![1];
+    mocks.voice.state.status = 'speaking';
+    const preventDefault = vi.fn();
+    keydown({ code: 'Space', target: { tagName: 'INPUT' }, preventDefault }); expect(mocks.voice.stopSpeaking).not.toHaveBeenCalled();
+    keydown({ code: 'Space', target: { tagName: 'DIV' }, preventDefault }); expect(mocks.voice.stopSpeaking).toHaveBeenCalledOnce(); expect(preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it.each(['consult', 'learning', 'maintenance', 'verify'])('does not speak %s runs even with a visible legacy prefix', async (purpose) => {
+    await emit('run.finished', { id: purpose, task_id: 'chat', purpose, status: 'done', answer: 'Private instructions' });
+    await vi.advanceTimersByTimeAsync(0); expect(mocks.voice.speak).not.toHaveBeenCalled();
+  });
+
+  it('reconciles completed runs once on hello after an SSE reconnect', async () => {
+    await emit('run.started', { id: 'recovered', task_id: 'chat', purpose: 'user_reply' });
+    mocks.api.mockImplementation(async (path: string) => path === '/api/conversations/chat' ? { runs: [{ id: 'recovered', purpose: 'user_reply', visibility: 'conversation', status: 'done', answer: 'Recovered result.' }, { id: 'private', purpose: 'verify', status: 'done', answer: 'Hidden result.' }] } : { task });
+    await emit('hello', {}); await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.api).toHaveBeenCalledWith('/api/conversations/chat');
+    expect(mocks.voice.speak).toHaveBeenCalledExactlyOnceWith('Recovered result.');
+    await emit('hello', {}); await finish('Recovered result.', 'recovered');
+    await vi.advanceTimersByTimeAsync(0); expect(mocks.voice.speak).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a fresh conversation for a command after an explicit new-conversation request', async () => {
+    await mocks.voice.onUtterance?.('Jarvis new conversation');
+    expect(mocks.navigate).toHaveBeenCalledWith('/'); expect(mocks.post).not.toHaveBeenCalled();
+    await mocks.voice.onUtterance?.('Jarvis research backup tools');
+    expect(mocks.post).toHaveBeenLastCalledWith('/api/conversations', { text: 'research backup tools' });
+  });
+
+  it('invalidates an asynchronous command as soon as a newer turn starts', async () => {
+    let resolve: (value: unknown) => void = () => {};
+    mocks.post.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const pending = mocks.voice.onUtterance?.('Jarvis research backup tools');
+    mocks.voice.onTurnStart?.(); resolve({ agent: 'claude', type: 'research' }); await pending;
+    expect(mocks.post).not.toHaveBeenCalledWith('/api/tasks', expect.anything());
   });
 
   describe('follow-up window', () => {

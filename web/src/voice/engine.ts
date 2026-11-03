@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { isEcho, isNoise, parseUtterance } from './intents.ts';
+import { turnComplete } from './turn.ts';
+import type { VoiceToken } from './turn.ts';
 import { sentences } from './speech.ts';
 import { openMicrophone, resolveMic } from './microphone.ts';
 import { modelLoadLabel } from './loading.ts';
@@ -8,6 +10,8 @@ import type { ModelLoad } from './loading.ts';
 /** Per-device voice preferences (voice runs in this browser/app, so they live in localStorage). */
 export interface VoicePrefs {
   enabled: boolean;
+  interruptions: 'speaker-safe' | 'headset';
+  turnDetection: 'smart' | 'simple';
   micId: string;
   micSensitivity: 'normal' | 'high';
   noiseSuppression: boolean;
@@ -26,6 +30,8 @@ export interface VoicePrefs {
 
 export const DEFAULT_PREFS: VoicePrefs = {
   enabled: false,
+  interruptions: 'speaker-safe',
+  turnDetection: 'smart',
   micId: '',
   micSensitivity: 'normal',
   noiseSuppression: true,
@@ -71,6 +77,8 @@ export type VoiceStatus = 'off' | 'loading' | 'idle' | 'listening' | 'hearing' |
 
 export interface VoiceState {
   status: VoiceStatus;
+  muted: boolean;
+  turnStatus: string;
   micLabel: string;
   micFallback: string;
   persisted: boolean | null;
@@ -109,7 +117,49 @@ const STALLED_STT = 'Speech recognition stalled, please say that again';
  * Nothing leaves the device and nothing costs credits.
  */
 class VoiceEngine {
-  state: VoiceState = { status: 'off', micLabel: '', micFallback: '', persisted: null, loads: {}, prefs: loadPrefs(), progress: { voice: 0, ears: 0 }, device: null, natural: 'unloaded', naturalError: null, adapter: '', fallback: '', activeEngine: null, outcome: '', ignored: false, heard: '', said: '', awaiting: false, level: 0, error: null, needsGesture: false };
+  state: VoiceState = { status: 'off', muted: false, turnStatus: 'Smart Turn loads on first turn', micLabel: '', micFallback: '', persisted: null, loads: {}, prefs: loadPrefs(), progress: { voice: 0, ears: 0 }, device: null, natural: 'unloaded', naturalError: null, adapter: '', fallback: '', activeEngine: null, outcome: '', ignored: false, heard: '', said: '', awaiting: false, level: 0, error: null, needsGesture: false };
+  speechEpoch = 0;
+  private turnId = 0;
+  private generations = { voice: 0, ears: 0, turn: 0 };
+  private gain: GainNode | null = null;
+  private onset: number | null = null;
+  private ducked = false;
+  private segmentHuman = false;
+  private paused = false;
+  private ttsRendering = false;
+  private segmentFrames: Float32Array[] = [];
+  private segmentSamples = 0;
+  private segmentCapped = false;
+  private cancelId = 0;
+  private cancelTimer: ReturnType<typeof setTimeout> | null = null;
+  private sttStarted = new Map<number, () => void>();
+  private turnWorker: Worker | null = null;
+  private turnAudio: Float32Array = new Float32Array();
+  private turnTimer: ReturnType<typeof setTimeout> | null = null;
+  private turnStarted = 0;
+  private decisionId = 0;
+  private smartFailed = false;
+  onStopSpeaking: (() => void) | null = null;
+  onStopAgent: (() => void) | null = null;
+  onTurnStart: (() => void) | null = null;
+  private token(generation: number): VoiceToken { return { turnId: this.turnId, speechEpoch: this.speechEpoch, generation }; }
+  private current(token: VoiceToken): boolean { return token.turnId === this.turnId && token.speechEpoch === this.speechEpoch; }
+  private outputGain(value: number) { this.gain?.gain.setTargetAtTime(value, this.ctx?.currentTime ?? 0, 0.02); }
+  private resumeOutput() {
+    if (!this.paused) return;
+    this.paused = false; void this.ctx?.resume?.();
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.resume?.();
+  }
+  muteMic() {
+    this.set({ muted: !this.state.muted, level: 0, awaiting: false, status: this.speaking() ? 'speaking' : this.vad ? 'listening' : 'idle' });
+    ++this.turnId; this.resetTurn(); this.drainStt();
+  }
+  private resetTurn() {
+    if (this.turnTimer) clearTimeout(this.turnTimer);
+    this.turnTimer = null; this.turnAudio = new Float32Array();
+    ++this.decisionId; this.turnStarted = 0;
+    this.segmentFrames = []; this.segmentSamples = 0;
+  }
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<Listener>();
   private tts: Worker | null = null;
@@ -123,7 +173,7 @@ class VoiceEngine {
   private playhead = 0;
   private speakId = 0;
   /** The newest line asked for while the natural voice was still loading. */
-  private held: { text: string; at: number; resolve: () => void } | null = null;
+  private held: { text: string; at: number; token: VoiceToken; resolve: () => void } | null = null;
   private speakDone: Map<number, () => void> = new Map();
   /** Resolves a transcription: the text, or null when it was dropped (superseded, stalled, released). */
   private sttWait: Map<number, (t: string | null) => void> = new Map();
@@ -164,11 +214,11 @@ class VoiceEngine {
     this.ready.voice = false;
     this.set({ loads: { ...this.state.loads, voice: { status: 'loading', loaded: 0, total: 0 } }, natural: 'loading', naturalError: null, fallback: '', adapter: '', device: null, progress: { ...this.state.progress, voice: 0 } });
     this.workers();
-    this.tts!.postMessage({ type: 'load', quality: this.state.prefs.voiceQuality });
+    this.send(this.tts!, { type: 'load', quality: this.state.prefs.voiceQuality });
   }
 
   setPrefs(patch: Partial<VoicePrefs>) {
-    const micChanged = (['micId', 'micSensitivity', 'noiseSuppression'] as const).some((key) => patch[key] !== undefined && patch[key] !== this.state.prefs[key]);
+    const micChanged = (['micId', 'micSensitivity', 'noiseSuppression', 'turnDetection', 'interruptions'] as const).some((key) => patch[key] !== undefined && patch[key] !== this.state.prefs[key]);
     const sttChanged = patch.sttModel !== undefined && patch.sttModel !== this.state.prefs.sttModel;
     if (patch.engine && patch.engine !== this.state.prefs.engine) {
       this.stopSpeaking();
@@ -188,33 +238,43 @@ class VoiceEngine {
       // storage blocked
     }
     this.set({ prefs });
+    if (patch.turnDetection) { this.smartFailed = false; this.resetTurn(); }
     if (micChanged && prefs.enabled) void this.restartMic();
     if (sttChanged && this.stt) {
       this.ready.ears = false;
       this.set({ loads: { ...this.state.loads, ears: { status: 'loading', loaded: 0, total: 0 } }, progress: { ...this.state.progress, ears: 0 } });
-      this.stt.postMessage({ type: 'load', model: prefs.sttModel });
+      this.drainStt(); this.send(this.stt, { type: 'load', model: prefs.sttModel });
     }
     if (patch.keepLoaded === false && !prefs.enabled) this.release();
     if (qualityChanged || (patch.engine === 'kokoro' && this.state.prefs.enabled)) this.retryVoice();
-    if ((patch.voice || patch.speed) && this.ready.voice) this.tts?.postMessage({ type: 'prewarm', phrases: PHRASES.slice(0, 4), voice: prefs.voice, speed: prefs.speed });
+    if ((patch.voice || patch.speed) && this.ready.voice) this.tts && this.send(this.tts, { type: 'prewarm', phrases: PHRASES.slice(0, 4), voice: prefs.voice, speed: prefs.speed });
   }
 
   private onWorker = (e: MessageEvent) => {
-    const m = e.data as { type: string; what?: 'voice' | 'ears'; load?: ModelLoad; id?: number; samples?: Float32Array; rate?: number; last?: boolean; text?: string; message?: string; device?: string; adapter?: string; fallback?: string };
-    if (m.type === 'model-load' && m.what && m.load) {
+    const m = e.data as { type: string; what?: 'voice' | 'ears'; load?: ModelLoad; id?: number; samples?: Float32Array; rate?: number; last?: boolean; text?: string; message?: string; device?: string; adapter?: string; fallback?: string; cancelId?: number };
+    if (m.type === 'rendering' || m.type === 'rendered') {
+      this.ttsRendering = m.type === 'rendering';
+    } else if (m.type === 'cancelled' && (m.cancelId === undefined || m.cancelId === this.cancelId)) {
+      if (this.cancelTimer) clearTimeout(this.cancelTimer);
+      this.cancelTimer = null;
+    } else if (m.type === 'started' && m.id !== undefined) {
+      this.sttStarted.get(m.id)?.();
+    } else if (m.type === 'model-load' && m.what && m.load) {
       this.set({ loads: { ...this.state.loads, [m.what]: m.load } });
     } else if (m.type === 'diagnostic') {
       this.set({ adapter: m.adapter ?? this.state.adapter, fallback: m.fallback ?? this.state.fallback });
     } else if (m.type === 'ready' && m.what) {
       this.ready[m.what] = true;
+      if (m.what === 'ears') for (const arm of this.sttStarted.values()) arm();
       this.set({ loads: { ...this.state.loads, [m.what]: { status: 'ready', loaded: 0, total: 0 } } });
-      if (m.what === 'voice') this.tts?.postMessage({ type: 'prewarm', phrases: PHRASES, voice: this.state.prefs.voice, speed: this.state.prefs.speed });
+      if (m.what === 'voice') this.tts && this.send(this.tts, { type: 'prewarm', phrases: PHRASES, voice: this.state.prefs.voice, speed: this.state.prefs.speed });
       this.set({ progress: { ...this.state.progress, [m.what]: 100 }, ...(m.what === 'voice' ? { device: m.device ?? null, natural: 'ready' as const, naturalError: null } : {}) });
-      // Say what arrived while the voice was loading, if it is still recent.
-      const held = this.held;
-      this.held = null;
-      if (m.what === 'voice' && held && Date.now() - held.at < 60_000) void this.speak(held.text).then(held.resolve);
-      else held?.resolve();
+      if (m.what === 'voice') {
+        const held = this.held;
+        this.held = null;
+        if (held && this.current(held.token) && Date.now() - held.at < HELD_LINE_MS) void this.speak(held.text).then(held.resolve);
+        else held?.resolve();
+      }
     } else if (m.type === 'audio' && m.samples && m.id === this.speakId) {
       this.enqueue(m.samples, m.rate ?? 24000, !!m.last, m.id);
     } else if (m.type === 'text' && m.id !== undefined) {
@@ -223,6 +283,8 @@ class VoiceEngine {
     } else if (m.type === 'superseded' && m.id !== undefined) {
       this.sttWait.get(m.id)?.(null);
     } else if (m.type === 'error') {
+      if (m.what === 'voice' && m.id != null && m.id !== this.speakId) return;
+      if (m.what === 'ears' && (m.id === undefined || m.id === null)) this.drainStt();
       if (m.what) this.set({ loads: { ...this.state.loads, [m.what]: { status: 'failed', loaded: 0, total: 0 } } });
       if (m.what === 'voice') {
         this.ready.voice = false;
@@ -247,18 +309,35 @@ class VoiceEngine {
 
   private workers() {
     if (!this.tts) {
+      this.ttsRendering = false;
       this.tts = new Worker(new URL('./tts.worker.ts', import.meta.url), { type: 'module' });
-      this.tts.onmessage = this.onWorker;
-      this.tts.onerror = (e) => this.onWorker({ data: { type: 'error', what: 'voice', message: e.message, id: this.speakId } } as MessageEvent);
+      this.bindWorker(this.tts, 'voice');
+      const worker = this.tts;
+      worker.onerror = (e) => { if (worker === this.tts) this.onWorker({ data: { type: 'error', what: 'voice', message: e.message, id: this.speakId } } as MessageEvent); };
     }
     if (!this.stt) {
       this.stt = new Worker(new URL('./stt.worker.ts', import.meta.url), { type: 'module' });
-      this.stt.onmessage = this.onWorker;
+      this.bindWorker(this.stt, 'ears');
       // A crash posts no request id, so drain every waiting request and start a fresh worker.
-      this.stt.onerror = (e) => this.restartStt('Speech recognition crashed, please say that again', e?.message);
+      const worker = this.stt;
+      worker.onerror = (e) => { if (worker === this.stt) this.restartStt('Speech recognition crashed, please say that again', e?.message); };
     }
   }
 
+  private bindWorker(worker: Worker, what: 'voice' | 'ears') {
+    const generation = ++this.generations[what];
+    worker.onmessage = (event) => {
+      if (this.generations[what] !== generation || (what === 'voice' ? this.tts : this.stt) !== worker) return;
+      const m = event.data;
+      if (m.generation !== undefined && m.generation !== generation) return;
+      if (m.type === 'audio' && m.speechEpoch !== undefined && m.speechEpoch !== this.speechEpoch) return;
+      this.onWorker(event);
+    };
+  }
+  private send(worker: Worker, message: object, transfer?: Transferable[]) {
+    const generation = worker === this.tts ? this.generations.voice : this.generations.ears;
+    worker.postMessage({ ...message, ...this.token(generation) }, transfer ?? []);
+  }
   private audio(): AudioContext {
     this.ctx ??= new AudioContext();
     return this.ctx;
@@ -269,20 +348,22 @@ class VoiceEngine {
     this.workers();
     if (this.state.prefs.engine === 'kokoro' && this.state.natural === 'unloaded') {
       this.set({ natural: 'loading', loads: { ...this.state.loads, voice: { status: 'loading', loaded: 0, total: 0 } } });
-      this.tts!.postMessage({ type: 'load', quality: this.state.prefs.voiceQuality });
+      this.send(this.tts!, { type: 'load', quality: this.state.prefs.voiceQuality });
     }
     if (!this.ready.ears && this.state.loads.ears?.status !== 'loading') {
       this.set({ loads: { ...this.state.loads, ears: { status: 'loading', loaded: 0, total: 0 } } });
-      this.stt!.postMessage({ type: 'load', model: this.state.prefs.sttModel });
+      this.send(this.stt!, { type: 'load', model: this.state.prefs.sttModel });
     }
   }
 
   /** Free models when memory retention is disabled. */
   private release() {
+    if (this.cancelTimer) clearTimeout(this.cancelTimer); this.cancelTimer = null;
     this.tts?.terminate();
     this.stt?.terminate();
     this.tts = null;
     this.stt = null;
+    this.turnWorker?.terminate(); this.turnWorker = null; ++this.generations.turn; this.resetTurn();
     this.ready = { voice: false, ears: false };
     this.drainStt();
     this.set({ loads: {}, progress: { voice: 0, ears: 0 }, device: null, natural: 'unloaded', naturalError: null, activeEngine: null, adapter: '', fallback: '' });
@@ -351,7 +432,7 @@ class VoiceEngine {
           onnxWASMBasePath: '/voice-runtime/vad/',
           positiveSpeechThreshold: prefs.micSensitivity === 'high' ? 0.45 : 0.6,
           negativeSpeechThreshold: prefs.micSensitivity === 'high' ? 0.3 : 0.45,
-          redemptionMs: 700,
+          redemptionMs: prefs.turnDetection === 'smart' && !this.smartFailed ? 300 : 700,
           minSpeechMs: prefs.micSensitivity === 'high' ? 200 : 300,
           preSpeechPadMs: 250,
           startOnLoad: false,
@@ -361,20 +442,53 @@ class VoiceEngine {
             this.set({ micLabel: stream.getAudioTracks()[0]?.label ?? '', micFallback: missing ? 'Selected microphone is unavailable · using system default' : '' });
             return stream;
           },
-          onFrameProcessed: (p: { isSpeech: number }) => {
+          onFrameProcessed: (p: { isSpeech: number }, frame?: Float32Array) => {
+            if (this.state.muted || (this.speaking() && this.state.prefs.interruptions === 'speaker-safe')) return;
+            if (frame && this.turnStarted && !this.segmentCapped) {
+              const remaining = Math.max(0, 480000 - this.turnAudio.length - this.segmentSamples);
+              const chunk = frame.slice(0, remaining);
+              this.segmentFrames.push(chunk); this.segmentSamples += chunk.length;
+              if (!remaining || this.segmentSamples + this.turnAudio.length >= 480000) {
+                const audio = new Float32Array(this.segmentSamples);
+                let offset = 0;
+                for (const part of this.segmentFrames) { audio.set(part, offset); offset += part.length; }
+                this.segmentCapped = true;
+                void this.endpoint(audio);
+              }
+            }
+            if (this.speaking() && this.state.prefs.interruptions === 'headset') {
+              if (p.isSpeech >= 0.6) {
+                this.onset ??= Date.now();
+                if (Date.now() - this.onset >= 160 && !this.ducked) { this.segmentHuman = true; this.ducked = true; this.outputGain(0.15); }
+                if (Date.now() - this.onset >= 200 && p.isSpeech >= 0.8 && !this.paused) { this.paused = true; void this.ctx?.suspend?.(); if (typeof speechSynthesis !== 'undefined') speechSynthesis.pause?.(); }
+              } else { this.onset = null; if (this.ducked && !this.segmentHuman) { this.ducked = false; this.outputGain(1); this.resumeOutput(); } }
+            }
             if (Math.abs(p.isSpeech - this.state.level) > 0.05) this.set({ level: p.isSpeech });
           },
           onSpeechStart: () => {
-            // Don't stop Jarvis yet: this may be its own voice from the speakers. handleSpeech decides.
+            if (this.state.muted || (this.speaking() && this.state.prefs.interruptions === 'speaker-safe')) return;
+            if (!this.turnAudio.length) { ++this.turnId; this.turnStarted = Date.now(); this.onTurnStart?.(); }
+            this.segmentHuman = false;
+            this.segmentFrames = []; this.segmentSamples = 0; this.segmentCapped = false;
+            if (this.turnTimer) clearTimeout(this.turnTimer);
+            ++this.decisionId;
             this.segmentSaid = this.speaking() ? this.state.said : '';
             this.feedback('');
             if (!this.segmentSaid) this.set({ status: 'hearing' });
           },
           onVADMisfire: () => {
+            this.segmentHuman = false;
+            this.ducked = false; this.onset = null; this.outputGain(1); this.resumeOutput();
+            if (this.speaking()) return;
+            if (this.turnAudio.length) { void this.endpoint(new Float32Array()); return; }
             this.set({ status: 'listening', heard: '' });
             this.feedback('Too short, try again', false, true);
           },
-          onSpeechEnd: (audio: Float32Array) => void this.handleSpeech(audio),
+          onSpeechEnd: (audio: Float32Array) => {
+            this.segmentFrames = []; this.segmentSamples = 0;
+            if (this.segmentCapped) { this.segmentCapped = false; return; }
+            void this.endpoint(audio);
+          },
         });
         if (generation !== this.micGeneration) { await vad.destroy(); return; }
         this.vad = vad;
@@ -408,48 +522,91 @@ class VoiceEngine {
     return this.speakDone.has(this.speakId);
   }
 
+  private async endpoint(audio: Float32Array) {
+    if (this.state.muted || (this.speaking() && this.state.prefs.interruptions === 'speaker-safe')) return;
+    if (this.state.prefs.turnDetection === 'simple') return this.handleSpeech(audio);
+    const remaining = Math.max(0, 480000 - this.turnAudio.length);
+    const combined = new Float32Array(this.turnAudio.length + Math.min(remaining, audio.length));
+    combined.set(this.turnAudio); combined.set(audio.subarray(0, remaining), this.turnAudio.length);
+    this.turnAudio = combined;
+    const token = this.token(this.generations.turn);
+    const id = ++this.decisionId;
+    const commit = () => {
+      if (id !== this.decisionId || !this.current(token)) return;
+      const full = this.turnAudio; this.resetTurn(); void this.handleSpeech(full);
+    };
+    this.turnTimer = setTimeout(commit, this.smartFailed ? 400 : 1700);
+    if (combined.length >= 480000) return commit();
+    if (this.smartFailed) return;
+    if (!this.turnWorker) {
+      this.turnWorker = new Worker(new URL('./turn.worker.ts', import.meta.url), { type: 'module' });
+      ++this.generations.turn;
+    }
+    const generation = this.generations.turn;
+    const fail = () => {
+      if (generation !== this.generations.turn) return;
+      this.smartFailed = true; this.set({ turnStatus: 'Simple timing - Smart Turn unavailable' });
+      this.turnWorker?.terminate(); this.turnWorker = null; ++this.generations.turn;
+      if (id === this.decisionId && this.current(token)) { if (this.turnTimer) clearTimeout(this.turnTimer); this.turnTimer = setTimeout(commit, 400); }
+    };
+    this.turnWorker.onerror = fail;
+    this.turnWorker.onmessage = (event) => {
+      const m = event.data;
+      if (generation !== this.generations.turn) return;
+      if (m.type === 'error') return fail();
+      this.set({ turnStatus: 'Smart Turn ready - on this device' });
+      if (m.id !== this.decisionId || !this.current(m)) return;
+      if (turnComplete(m.probability, 300, Math.max(combined.length / 16, Date.now() - this.turnStarted))) commit();
+      else this.set({ status: 'hearing' });
+    };
+    this.turnWorker.postMessage({ ...this.token(generation), id, audio: combined.slice(-128000) });
+  }
   private async handleSpeech(audio: Float32Array) {
     const echoOf = this.segmentSaid;
     this.segmentSaid = '';
     if (!this.stt) return;
     const generation = this.micGeneration;
+    const token = this.token(this.generations.ears);
     if (!echoOf) {
       this.feedback('Transcribing…');
       this.set({ status: 'thinking', heard: '…' });
     }
     const text = await this.transcribe(audio);
-    if (this.state.status === 'off' || generation !== this.micGeneration) return;
+    if (this.state.status === 'off' || this.state.muted || generation !== this.micGeneration || !this.current(token)) return;
     if (this.state.status === 'thinking') this.set({ status: 'listening' });
     if (text === null) return;
-    if (echoOf && isEcho(text, echoOf)) return;
+    const weakOnset = !this.segmentHuman;
+    this.segmentHuman = false;
+    this.ducked = false; this.onset = null; this.outputGain(1);
+    if (echoOf && this.speaking() && weakOnset && isEcho(text, echoOf)) return;
     this.set({ heard: text });
     if (isNoise(text)) {
       if (!echoOf) this.feedback('Not sure what you meant', false, true);
       return;
     }
     // Barge-in: a real command (not noise, not Jarvis's own voice) stops Jarvis mid-line.
-    if (this.speaking() && parseUtterance(text, { requireWake: this.state.prefs.wakeWord, awaiting: this.state.awaiting }).kind !== 'ignore') this.stopSpeaking();
+    if (this.speaking() && parseUtterance(text, { requireWake: this.state.prefs.wakeWord, awaiting: this.state.awaiting }).kind !== 'ignore') this.stopSpeaking(false);
     this.onUtterance?.(text);
   }
 
   /** Send audio to Whisper with a deadline, so one stuck run can't stall the voice loop. */
   private transcribe(audio: Float32Array): Promise<string | null> {
     const id = this.nextId++;
-    const loaded = this.ready.ears;
+    const token = this.token(this.generations.ears);
     return new Promise<string | null>((resolve) => {
-      const timer = setTimeout(() => {
-        if (!this.sttWait.has(id)) return;
-        if (loaded && this.ready.ears) return this.restartStt(STALLED_STT);
-        // Still downloading: drop this request but don't restart, which would restart the download.
+      let timer: ReturnType<typeof setTimeout>;
+      const arm = () => { clearTimeout(timer); timer = setTimeout(() => this.sttWait.has(id) && this.restartStt(STALLED_STT), STT_READY_MS); };
+      timer = setTimeout(() => {
         this.sttWait.get(id)?.(null);
-        this.feedback('Speech model is still loading · try again in a moment', false, true);
-      }, loaded ? STT_READY_MS : STT_LOADING_MS);
+        this.feedback('Speech model is still loading ? try again in a moment', false, true);
+      }, STT_LOADING_MS);
+      this.sttStarted.set(id, arm);
+      if (this.ready.ears) arm();
       this.sttWait.set(id, (t) => {
-        clearTimeout(timer);
-        this.sttWait.delete(id);
-        resolve(t);
+        clearTimeout(timer); this.sttStarted.delete(id); this.sttWait.delete(id);
+        resolve(this.current(token) ? t : null);
       });
-      this.stt!.postMessage({ type: 'transcribe', id, audio, language: this.state.prefs.language, model: this.state.prefs.sttModel }, [audio.buffer]);
+      this.send(this.stt!, { type: 'transcribe', id, audio, language: this.state.prefs.language, model: this.state.prefs.sttModel }, [audio.buffer]);
     });
   }
 
@@ -471,7 +628,7 @@ class VoiceEngine {
     }
     this.workers();
     this.set({ loads: { ...this.state.loads, ears: { status: 'loading', loaded: 0, total: 0 } }, progress: { ...this.state.progress, ears: 0 } });
-    this.stt!.postMessage({ type: 'load', model: this.state.prefs.sttModel });
+    this.send(this.stt!, { type: 'load', model: this.state.prefs.sttModel });
     void this.speak(message);
     this.feedback(message, false, true);
   }
@@ -497,17 +654,18 @@ class VoiceEngine {
     buf.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.connect(ctx.destination);
+    this.gain ??= ctx.createGain?.() ?? null;
+    if (this.gain) { this.gain.connect(ctx.destination); src.connect(this.gain); } else src.connect(ctx.destination);
     const at = Math.max(ctx.currentTime + 0.03, this.playhead);
     src.start(at);
-    this.playhead = at + buf.duration;
+    this.playhead = at + buf.duration + 0.12;
     this.playing.push(src);
     this.set({ status: 'speaking', activeEngine: 'kokoro' });
     if (!last) this.armVoiceWatchdog(id);
     else {
       // onended can go missing (suspended context, device change): resolve after playback + 3 s anyway.
       this.clearSpeakTimer();
-      this.speakTimer = setTimeout(() => id === this.speakId && this.stopSpeaking(), Math.max(0, this.playhead - ctx.currentTime) * 1000 + 3000);
+      this.speakTimer = setTimeout(() => id === this.speakId && this.stopSpeaking(false), Math.max(0, this.playhead - ctx.currentTime) * 1000 + 3000);
     }
     src.onended = () => {
       this.playing = this.playing.filter((p) => p !== src);
@@ -536,7 +694,7 @@ class VoiceEngine {
       this.held?.resolve();
       this.feedback('Natural voice is loading · Jarvis will say this when it is ready');
       return new Promise<void>((resolve) => {
-        const held = { text: clean, at: Date.now(), resolve };
+        const held = { text: clean, at: Date.now(), token: this.token(this.generations.voice), resolve };
         this.held = held;
         // Don't keep the caller waiting forever if the voice never becomes ready.
         setTimeout(() => {
@@ -547,14 +705,14 @@ class VoiceEngine {
       });
     }
     this.workers();
-    this.stopSpeaking();
+    this.stopSpeaking(false);
     const id = this.nextId++;
     this.speakId = id;
-    this.set({ said: clean, activeEngine: 'kokoro' });
+    this.set({ said: clean, activeEngine: 'kokoro', status: 'speaking' });
     return new Promise<void>((resolve) => {
       this.speakDone.set(id, resolve);
       this.armVoiceWatchdog(id);
-      this.tts!.postMessage({ type: 'speak', id, text: clean, voice: this.state.prefs.voice, speed: this.state.prefs.speed });
+      this.send(this.tts!, { type: 'speak', id, text: clean, voice: this.state.prefs.voice, speed: this.state.prefs.speed });
     });
   }
 
@@ -562,10 +720,10 @@ class VoiceEngine {
   private speakSystem(text: string): Promise<void> {
     const synth = typeof speechSynthesis === 'undefined' ? null : speechSynthesis;
     if (!synth) return Promise.resolve();
-    this.stopSpeaking();
+    this.stopSpeaking(false);
     const id = this.nextId++;
     this.speakId = id;
-    this.set({ said: text, activeEngine: 'system' });
+    this.set({ said: text, activeEngine: 'system', status: 'speaking' });
     const voices = synth.getVoices();
     const lang = this.state.prefs.language === 'auto' ? 'en' : this.state.prefs.language;
     const pick =
@@ -599,9 +757,29 @@ class VoiceEngine {
     });
   }
 
-  stopSpeaking() {
+  stopSpeaking(invalidate = true) {
+    if (invalidate) {
+      ++this.speechEpoch; ++this.turnId; this.resetTurn(); this.drainStt();
+      this.held?.resolve(); this.held = null; this.onStopSpeaking?.();
+      if (this.state.status === 'hearing' || this.state.status === 'thinking') this.set({ status: this.vad ? 'listening' : 'idle' });
+      if (this.state.prefs.enabled) this.setAwaiting(true);
+    }
+    this.ducked = false; this.onset = null; this.outputGain(1);
     this.clearSpeakTimer();
-    this.tts?.postMessage({ type: 'cancel' });
+    const worker = this.tts;
+    if ((this.speaking() || this.ttsRendering) && worker && !this.cancelTimer) {
+      this.cancelTimer = setTimeout(() => {
+        this.cancelTimer = null;
+        if (this.tts !== worker) return;
+        worker.terminate(); this.tts = null; this.ready.voice = false;
+        const said = this.state.said;
+        const done = this.speakDone.get(this.speakId);
+        this.speakDone.delete(this.speakId);
+        this.set({ natural: 'unloaded' }); this.preload();
+        if (done) void this.speak(said).then(done);
+      }, 500);
+    }
+    this.tts && this.send(this.tts, { type: 'cancel', cancelId: ++this.cancelId });
     if (typeof speechSynthesis !== 'undefined' && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel();
     for (const p of this.playing) {
       try {
