@@ -9,11 +9,11 @@ import { AgentBadge, MicButton, Segmented, Sheet } from './ui.tsx';
 
 const EXAMPLES = [
   'Research the best Postgres backup tools for a small VPS',
-  'Fix the login bug in ClientEasy',
+  'Fix the failing tests in my project',
   'Draft a friendly reply to Sam about the launch date',
   'Summarise unread email from the last two days',
   'Compare Hetzner and DigitalOcean for a 2 GB app server',
-  'Write release notes for ClientEasy 2.5 from merged PRs',
+  'Write release notes from the last merged PRs',
 ];
 
 interface Preview {
