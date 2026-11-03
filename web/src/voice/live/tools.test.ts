@@ -32,9 +32,9 @@ describe('voice tool bridge with fake requests and events', () => {
     f.request.mockResolvedValue({ runs: [{ id: 'r', agent: 'claude', status: 'failed', error: 'Sign in first' }] });
     f.emit('reconcile', {}); expect(await pending).toMatchObject({ status: 'failed', answer: 'Sign in first' });
   });
-  it('get_status includes availability and active runs only', async () => {
+  it('get_status includes availability, current work and active runs', async () => {
     const f = fixture(); f.request.mockResolvedValueOnce({ agents: { claude: { state: 'busy' }, codex: { state: 'ready' } } }).mockResolvedValueOnce({ runs: [{ id: 'r', agent: 'claude', status: 'running' }, { id: 'old', status: 'done' }] });
-    expect(await f.tools.handle('get_status')).toEqual({ agents: [{ agent: 'claude', state: 'busy' }, { agent: 'codex', state: 'ready' }], active: [{ id: 'r', agent: 'claude' }] });
+    expect(await f.tools.handle('get_status')).toEqual({ agents: [{ agent: 'claude', state: 'busy', detail: undefined, working_on: [] }, { agent: 'codex', state: 'ready', detail: undefined, working_on: [] }], active: [{ id: 'r', agent: 'claude' }] });
   });
   it('search_memory returns only five titles and bounded snippets', async () => {
     const f = fixture(); f.request.mockResolvedValue({ results: Array.from({ length: 8 }, () => ({ title: 'Note', snippet: 'x'.repeat(500), privateField: 'hidden' })) });
@@ -59,5 +59,28 @@ describe('voice tool bridge with fake requests and events', () => {
     await expect(f.tools.handle('ask_agent', { request: '' })).rejects.toThrow('Supply request');
     await expect(f.tools.handle('ask_agent', { request: 'work', agent: 'wrong' })).rejects.toThrow('Choose auto');
     await expect(f.tools.handle('unknown')).rejects.toThrow('Unknown voice tool');
+  });
+});
+
+describe('usage and status for the voice brain', () => {
+  it('get_usage reports real plan percentages, speakable reset times and voice minutes', async () => {
+    const f = fixture();
+    const inTwoHours = new Date(Date.now() + 2 * 3600_000 + 10 * 60_000).toISOString();
+    f.request.mockImplementation(async (path: string) =>
+      path === '/api/agents'
+        ? { agents: { claude: { state: 'ready', usage: { five_hour: { usedPercent: 41.6, resetsAt: inTwoHours }, weekly: { usedPercent: 23, resetsAt: null } } }, codex: { state: 'ready', usage: { five_hour: null, weekly: null } } } }
+        : { inSec: 300, outSec: 120 });
+    const r = await f.tools.handle('get_usage', {});
+    expect(r).toMatchObject({ claude: { five_hour: { used_percent: 42 }, weekly: { used_percent: 23, resets_in: 'unknown' } }, codex: { five_hour: 'not reported yet' }, voice_today_minutes: 7 });
+    expect((r.claude as { five_hour: { resets_in: string } }).five_hour.resets_in).toMatch(/^in 2 hours (9|10) minutes$/);
+  });
+
+  it('get_status says what each agent is working on', async () => {
+    const f = fixture();
+    f.request.mockImplementation(async (path: string) =>
+      path === '/api/agents'
+        ? { agents: { claude: { state: 'busy', detail: 'Fix the login bug', busy: [{ title: 'Fix the login bug' }], usage: { five_hour: null, weekly: null } } } }
+        : { runs: [] });
+    expect(await f.tools.handle('get_status', {})).toMatchObject({ agents: [{ agent: 'claude', state: 'busy', working_on: ['Fix the login bug'] }] });
   });
 });
