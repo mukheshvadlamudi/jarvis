@@ -83,6 +83,7 @@ export function registerConversationRoutes(app: Hono, s: Services): void {
   };
 
   const send = async (task: Task, text: string, b: MessageBody, first: boolean) => {
+    if (get(s.db, "SELECT id FROM workflow_runs WHERE conversation_id = ? AND status IN ('running','waiting_approval')", task.id)) throw new Error('This workflow is still working. Approve its pending action, cancel it, or wait for the summary.');
     const opts = askOptions(b);
     if (b.agent === 'both' && !opts.agent) opts.agent = 'claude';
     const r = await s.orchestrator.ask(task.id, text, opts);
@@ -120,10 +121,10 @@ export function registerConversationRoutes(app: Hono, s: Services): void {
     const tasks = all<Task>(s.db, `SELECT * FROM tasks t WHERE mode = 'chat' AND
       (? = '' OR instr(lower(title), lower(?)) > 0 OR EXISTS (
         SELECT 1 FROM runs r WHERE r.task_id = t.id AND visibility = 'conversation'
-        AND purpose IN ('user_reply', 'both', 'second_opinion', 'handoff')
+        AND purpose IN ('user_reply', 'both', 'second_opinion', 'handoff', 'workflow_step')
         AND (instr(lower(COALESCE(owner_text, '')), lower(?)) > 0 OR instr(lower(COALESCE(answer, '')), lower(?)) > 0)
       )) ORDER BY updated_at DESC LIMIT ?`, q ?? '', q ?? '', q ?? '', q ?? '', limit);
-    const lastAnswer = (id: string) => get<{ answer: string | null }>(s.db, "SELECT answer FROM runs WHERE task_id = ? AND visibility = 'conversation' AND purpose IN ('user_reply', 'both', 'second_opinion', 'handoff') AND answer IS NOT NULL ORDER BY started_at DESC, rowid DESC LIMIT 1", id)?.answer ?? null;
+    const lastAnswer = (id: string) => get<{ answer: string | null }>(s.db, "SELECT answer FROM runs WHERE task_id = ? AND visibility = 'conversation' AND purpose IN ('user_reply', 'both', 'second_opinion', 'handoff', 'workflow_step') AND answer IS NOT NULL ORDER BY started_at DESC, rowid DESC LIMIT 1", id)?.answer ?? null;
     return c.json({
       conversations: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status, agent: t.agent, updated_at: t.updated_at, preview: (lastAnswer(t.id) ?? '').slice(0, 160) })),
     });
@@ -185,7 +186,7 @@ export function registerConversationRoutes(app: Hono, s: Services): void {
     const b = await body<{ runId?: string; effort?: Effort }>(c);
     const target = b.runId
       ? get<Run>(s.db, "SELECT * FROM runs WHERE id = ? AND task_id = ? AND visibility = 'conversation'", b.runId, t.id)
-      : get<Run>(s.db, "SELECT * FROM runs WHERE task_id = ? AND status = 'done' AND visibility = 'conversation' AND purpose IN ('user_reply', 'both', 'second_opinion') ORDER BY started_at DESC, rowid DESC LIMIT 1", t.id);
+      : get<Run>(s.db, "SELECT * FROM runs WHERE task_id = ? AND status = 'done' AND visibility = 'conversation' AND purpose IN ('user_reply', 'both', 'second_opinion', 'workflow_step') ORDER BY started_at DESC, rowid DESC LIMIT 1", t.id);
     if (!target?.answer) return bad(c, 'There is no finished answer to check yet.', 409);
     const from = (target.agent === 'codex' ? 'codex' : 'claude') as AgentId;
     const to = other(from);

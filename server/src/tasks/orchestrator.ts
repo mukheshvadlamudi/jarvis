@@ -29,6 +29,8 @@ export interface AskOptions {
   effort?: Effort;
   /** Upload ids (see the uploads table). */
   attachments?: string[];
+  purpose?: RunPurpose;
+  sandbox?: 'read-only' | 'workspace-write';
 }
 
 interface StartOptions extends AskOptions {
@@ -246,7 +248,7 @@ export class Orchestrator {
   private lastRun(taskId: string): Run | undefined {
     return get<Run>(
       this.d.db,
-      `SELECT * FROM runs WHERE task_id = ? AND purpose IN ('user_reply', 'handoff') AND visibility = 'conversation'
+      `SELECT * FROM runs WHERE task_id = ? AND purpose IN ('user_reply', 'handoff', 'workflow_step') AND visibility = 'conversation'
        ORDER BY started_at DESC, rowid DESC LIMIT 1`,
       taskId,
     );
@@ -266,7 +268,7 @@ export class Orchestrator {
     const lastAgent = last?.agent === 'claude' || last?.agent === 'codex' ? last.agent : undefined;
     const agent = opts.agent ?? lastAgent;
     const contaminated = last?.session_id && get(this.d.db, "SELECT id FROM runs WHERE task_id = ? AND session_id = ? AND visibility = 'internal' LIMIT 1", taskId, last.session_id);
-    const same = !!last && last.agent === agent && !!last.session_id && !contaminated;
+    const same = !opts.purpose && !!last && last.agent === agent && !!last.session_id && !contaminated;
     if (t.status !== 'queued') this.d.tasks.setStatus(taskId, 'queued', { not_before: null });
     this.starting.add(taskId);
     try {
@@ -274,9 +276,9 @@ export class Orchestrator {
         ...opts,
         ownerText: text,
         agent,
-        prompt: same || !last ? text : `${this.history(taskId)}${NEW_MESSAGE}${text}`,
+        prompt: opts.purpose === 'workflow_step' || same || !last ? text : `${this.history(taskId)}${NEW_MESSAGE}${text}`,
         resumeSessionId: same ? last!.session_id! : undefined,
-        reason: opts.agent ? `you chose ${opts.agent}` : last ? (same ? `follow-up stays with ${agent}` : `continues with ${agent}`) : undefined,
+        reason: opts.purpose === 'workflow_step' ? `workflow: ${text.split('\n')[0].slice(0, 100)}` : opts.agent ? `you chose ${opts.agent}` : last ? (same ? `follow-up stays with ${agent}` : `continues with ${agent}`) : undefined,
       });
       return { mode: 'resumed', runId: runId ?? undefined };
     } finally {
@@ -286,7 +288,7 @@ export class Orchestrator {
 
   /** The conversation so far as plain text, for an agent joining it (newest kept when long). */
   history(taskId: string): string {
-    const runs = all<Run>(this.d.db, "SELECT * FROM runs WHERE task_id = ? AND status = 'done' AND visibility = 'conversation' AND purpose IN ('user_reply', 'both', 'second_opinion', 'handoff') ORDER BY started_at, rowid", taskId);
+    const runs = all<Run>(this.d.db, "SELECT * FROM runs WHERE task_id = ? AND status = 'done' AND visibility = 'conversation' AND purpose IN ('user_reply', 'both', 'second_opinion', 'handoff', 'workflow_step') ORDER BY started_at, rowid", taskId);
     const who = (r: Run) => {
       const name = r.agent === 'claude' ? 'Claude' : r.agent === 'codex' ? 'Codex' : r.agent === 'gemini' ? 'Jarvis (voice)' : r.agent;
       return r.purpose === 'both' || r.purpose === 'second_opinion' ? `${name} (${r.purpose})` : name;
@@ -368,7 +370,7 @@ export class Orchestrator {
     const effort = opts.effort ?? task.effort;
     const model = opts.model && opts.model !== 'default' ? opts.model : cfg.agents[agent].model || undefined;
     const maintenance = task.schedule_id && get(this.d.db, "SELECT id FROM schedules WHERE id = ? AND (built_in = 'memory_consolidation' OR json_extract(task_template_json, '$.routine') = 'memory_consolidation')", task.schedule_id);
-    const purpose: RunPurpose = task.handoff_json ? 'handoff' : maintenance ? 'maintenance' : 'user_reply';
+    const purpose: RunPurpose = opts.purpose ?? (task.handoff_json ? 'handoff' : maintenance ? 'maintenance' : 'user_reply');
     const visibility: RunVisibility = purpose === 'maintenance' ? 'internal' : 'conversation';
     run(
       this.d.db,
@@ -391,7 +393,7 @@ export class Orchestrator {
       contextPrefix: opts.resumeSessionId ? '' : task.mode === 'chat' ? `${ctx.prefix}${CHAT_GUIDE}` : ctx.prefix,
       cwd: workdir.cwd,
       resumeSessionId: opts.resumeSessionId,
-      sandbox: task.type === 'admin' || task.type === 'update' ? 'read-only' : 'workspace-write',
+      sandbox: opts.sandbox ?? (task.type === 'admin' || task.type === 'update' ? 'read-only' : 'workspace-write'),
       allowNetwork: task.type !== 'code' || task.outward === 1,
       taskType: task.type,
       vaultPath: this.d.vaultPath,
@@ -403,6 +405,7 @@ export class Orchestrator {
       ...(task.mode === 'chat' ? { webSearch: true } : {}),
     };
     for (const h of this.inputHooks) h(task, input);
+    if (opts.sandbox) input.sandbox = opts.sandbox;
 
     const handle = this.d.runners.get(agent).start(input, sink);
     this.active.set(task.id, { taskId: task.id, runId, handle, agent, visibility });
@@ -530,7 +533,7 @@ export class Orchestrator {
     }
     const finished = this.getRun(runId)!;
     this.d.bus.publish('run.finished', finished);
-    if (result.status === 'failed' && LIMIT_ERROR.test(`${result.error ?? ''} ${result.summary}`)) await this.switchOnLimit(taskId, finished, workdir);
+    if (finished.purpose !== 'workflow_step' && result.status === 'failed' && LIMIT_ERROR.test(`${result.error ?? ''} ${result.summary}`)) await this.switchOnLimit(taskId, finished, workdir);
     const task = this.d.tasks.get(taskId);
     if (task && finished.visibility !== 'internal') {
       for (const h of this.afterRun) {

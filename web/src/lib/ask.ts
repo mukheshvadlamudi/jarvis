@@ -41,7 +41,7 @@ export interface ConversationRun extends Run {
   parent_run_id?: string | null;
 }
 
-export type RunPurpose = 'user_reply' | 'both' | 'second_opinion' | 'consult' | 'learning' | 'handoff' | 'maintenance' | 'verify';
+export type RunPurpose = 'user_reply' | 'both' | 'second_opinion' | 'consult' | 'learning' | 'handoff' | 'maintenance' | 'verify' | 'workflow_step';
 type TypedRun = Run & { purpose?: RunPurpose | null; visibility?: 'conversation' | 'activity' | 'internal' | null; owner_text?: string | null; parent_run_id?: string | null };
 
 export function runPurpose(run: TypedRun): RunPurpose {
@@ -96,6 +96,7 @@ export const NEW_MESSAGE = 'New message from the owner:\n';
 /** What the owner actually typed for this run (the history handed to a joining agent is hidden). */
 export function askedText(run: Run): string {
   if ((run as TypedRun).owner_text != null) return (run as TypedRun).owner_text!;
+  if (runPurpose(run) === 'workflow_step') return run.route_reason?.replace(/^workflow: /, '') ?? 'Workflow step';
   return (run.prompt ?? '').split(NEW_MESSAGE).pop()!.trim();
 }
 

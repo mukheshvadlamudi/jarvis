@@ -1,3 +1,4 @@
+import { setupWorkflows } from './workflows/service.ts';
 import type { Services } from './app.ts';
 import { setupAgents } from './agents/service.ts';
 import { setupCollaboration } from './collab/index.ts';
@@ -18,4 +19,5 @@ export function setupModules(s: Services): void {
   setupTelegram(s);
   setupCollaboration(s);
   setupAgents(s);
+  setupWorkflows(s);
 }

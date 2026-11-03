@@ -28,6 +28,7 @@ export const routes: RouteDef[] = [
   { path: '/approvals', title: 'Approvals', icon: CheckCircle2, load: () => import('./pages/Approvals.tsx'), nav: 'main', badge: 'approvals', key: 'a', order: 3 },
   { path: '/runs/:id', title: 'Run', icon: PlayCircle, load: () => import('./pages/Run.tsx') },
   { path: '/tasks/:id', title: 'Task', icon: Activity, load: () => import('./pages/Run.tsx') },
+  { path: '/workflows', title: 'Workflows', icon: Activity, load: () => import('./pages/Workflows.tsx'), nav: 'work', order: 19 },
   { path: '/research', title: 'Research', icon: FlaskConical, load: () => import('./pages/Research.tsx'), nav: 'work', key: 'e', order: 20 },
   { path: '/updates', title: 'Updates', icon: Newspaper, load: () => import('./pages/Updates.tsx'), nav: 'work', key: 'n', order: 21 },
   { path: '/projects', title: 'Projects', icon: FolderGit2, load: () => import('./pages/Projects.tsx'), nav: 'work', key: 'p', order: 22 },

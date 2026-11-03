@@ -1,3 +1,4 @@
+import { registerWorkflowRoutes } from './workflows.ts';
 import type { Hono } from 'hono';
 import type { Services } from '../app.ts';
 import { registerCollabRoutes } from './collab.ts';
@@ -16,6 +17,7 @@ import { registerWorkspaceRoutes } from './workspaces.ts';
 /** Each module adds exactly one line here, so parallel branches stay mergeable. */
 export function registerRoutes(app: Hono, s: Services): void {
   registerCoreRoutes(app, s);
+  registerWorkflowRoutes(app, s);
   registerMemoryRoutes(app, s);
   registerSkillsRoutes(app, s);
   registerMcpRoutes(app, s);

@@ -1,3 +1,4 @@
+import { seedWorkflows } from './workflows/seed.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -258,6 +259,7 @@ export function seedIfEmpty(s: Services, now = Date.now()): boolean {
   seedMemory(s, now);
   seedSchedules(s, now);
   seedWorkspaces(s, now);
+  seedWorkflows(s, now);
   s.bus.publish('seeded', {});
   return true;
 }

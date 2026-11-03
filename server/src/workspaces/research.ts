@@ -39,7 +39,7 @@ export function reportNote(body: string, meta: { taskId: string; project: string
  */
 export function setupResearch(s: Services): void {
   s.orchestrator.inputHooks.push((task, input) => {
-    if (task.type !== 'research') return;
+    if (task.type !== 'research' || input.sandbox === 'read-only') return;
     input.webSearch = true;
     input.allowNetwork = true;
     input.prompt += input.resumeSessionId ? '\n\n(If this changes the findings, update report.md, keeping the Sources section.)' : RESEARCH_INSTRUCTIONS;

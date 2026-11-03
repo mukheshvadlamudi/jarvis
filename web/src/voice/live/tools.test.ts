@@ -10,6 +10,27 @@ function fixture() {
   return { tools, request, unsubscribe, changed, emit: (type: string, data: unknown) => listener({ type, data }) };
 }
 describe('voice tool bridge with fake requests and events', () => {
+  it('runs a workflow by name and resolves its final spoken summary', async () => {
+    const f = fixture();
+    f.request.mockResolvedValueOnce({ workflows: [{ id: 'morning-brief', name: 'Morning brief', triggers: ['/brief'] }] })
+      .mockResolvedValueOnce({ workflowRunId: 'wf', conversationId: 'chat' })
+      .mockResolvedValue({ id: 'wf', status: 'running' });
+    const pending = f.tools.handle('run_workflow', { workflow: 'Morning brief', input: '' });
+    await vi.waitFor(() => expect(f.changed).toHaveBeenCalledWith('chat'));
+    f.emit('workflow.updated', { id: 'other', status: 'done', summary: 'Wrong' });
+    f.emit('workflow.updated', { id: 'wf', conversation_id: 'chat', status: 'done', summary: '**Your brief** is ready.' });
+    expect(await pending).toMatchObject({ status: 'done', answer: 'Your brief is ready.' });
+    expect(f.unsubscribe).toHaveBeenCalledOnce();
+  });
+  it('reconciles a fast workflow approval pause and lists user workflows', async () => {
+    const f = fixture();
+    f.request.mockResolvedValueOnce({ workflows: [{ id: 'ship-a-fix', name: 'Ship a fix', triggers: ['/fix'] }] })
+      .mockResolvedValueOnce({ workflowRunId: 'wf', conversationId: 'chat' })
+      .mockResolvedValueOnce({ id: 'wf', conversation_id: 'chat', status: 'waiting_approval', current_step: 0, definition: { steps: [{ kind: 'approval', summary: 'Push branch and open a PR?' }] } });
+    expect(await f.tools.handle('run_workflow', { workflow: '/fix', input: 'Fix auth' })).toMatchObject({ status: 'waiting_approval', answer: 'Waiting for your OK: Push branch and open a PR?' });
+    f.request.mockResolvedValue({ workflows: [{ id: 'custom', name: 'Custom routine', description: 'Mine', triggers: [], input: { label: 'Input', required: false }, private: 'hidden' }] });
+    expect(await f.tools.handle('list_workflows')).toEqual({ workflows: [{ id: 'custom', name: 'Custom routine', description: 'Mine', triggers: [], input: { label: 'Input', required: false } }] });
+  });
   it('waits for the exact agent run and strips Markdown from the first 1500 characters', async () => {
     const f = fixture(); f.request.mockResolvedValueOnce({ runId: 'run1', conversation: { id: 'chat' } }).mockResolvedValue({ runs: [{ id: 'run1', status: 'running' }] });
     const result = f.tools.handle('ask_agent', { request: 'Research trends', agent: 'claude' });

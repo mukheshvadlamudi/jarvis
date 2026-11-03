@@ -16,7 +16,7 @@ const isolation = { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-E
 const assets = new Map<string, string | Uint8Array>();
 beforeAll(async () => {
   const root = resolve(import.meta.dirname, '../..');
-  const entry = `import {createElement} from 'react'; import {createRoot} from 'react-dom/client'; import Ask from '${root.replaceAll('\\', '/')}/pages/Ask.tsx'; import {connectLive} from '${root.replaceAll('\\', '/')}/lib/live.ts'; connectLive(); createRoot(document.getElementById('root')).render(createElement(Ask,{params:location.pathname.startsWith('/c/')?{id:'test'}:{}}));`;
+  const entry = `import {createElement} from 'react'; import {createRoot} from 'react-dom/client'; import Ask from '${root.replaceAll('\\', '/')}/pages/Ask.tsx'; import Workflows from '${root.replaceAll('\\', '/')}/pages/Workflows.tsx'; import {connectLive} from '${root.replaceAll('\\', '/')}/lib/live.ts'; connectLive(); createRoot(document.getElementById('root')).render(createElement(location.pathname==='/workflows'?Workflows:Ask,{params:location.pathname.startsWith('/c/')?{id:'test'}:{}}));`;
   const result = await build({ configFile: false, root: resolve(root, '..'), logLevel: 'silent', plugins: [react(), { name: 'ask-test-entry', resolveId: (id) => id === 'virtual:ask-test' ? id : undefined, load: (id) => id === 'virtual:ask-test' ? entry : undefined }], build: { write: false, minify: false, rolldownOptions: { input: 'virtual:ask-test', external: ['@ricky0123/vad-web'], output: { codeSplitting: false } } } });
   const output = Array.isArray(result) ? result[0].output : 'output' in result ? result.output : [];
   bundle = output.map((c) => c.type === 'chunk' ? c.code : '').join('\n');
@@ -39,6 +39,7 @@ afterAll(async () => { await browser?.close(); if (server) await new Promise<voi
 
 async function open(path = '/') {
   const page = await browser.newPage();
+  page.setDefaultTimeout(6000);
   await page.addInitScript(() => {
     // Deterministic SSE transport; no server or real agent process is started.
     const sources: Array<{ handlers: Record<string, (e: { data: string }) => void> }> = [];
@@ -55,16 +56,55 @@ async function open(path = '/') {
     const asset = assets.get(url.pathname);
     if (asset) return route.fulfill({ contentType: 'text/javascript', body: typeof asset === 'string' ? asset : Buffer.from(asset) });
     if (!url.pathname.startsWith('/api/')) return route.fulfill({ contentType: 'text/html', headers: isolation, body: html });
-    const data = url.pathname === '/api/agents' ? { agents: {}, threshold: 85 } : url.pathname.startsWith('/api/conversations/') ? { conversation: { id: 'test', title: 'Review launch' }, runs: [], active: false, approvals: [] } : url.pathname === '/api/runs' ? { active: [], runs: [] } : { conversations: [] };
+    const data = url.pathname === '/api/workflows' ? { workflows: [], runs: [], errors: [] } : url.pathname === '/api/agents' ? { agents: {}, threshold: 85 } : url.pathname.startsWith('/api/conversations/') ? { conversation: { id: 'test', title: 'Review launch' }, runs: [], active: false, approvals: [] } : url.pathname === '/api/runs' ? { active: [], runs: [] } : { conversations: [] };
     return route.fulfill({ json: data });
   });
   await page.goto(`${base}${path}`);
-  await page.locator('#ask-input').waitFor();
+  if (path === '/workflows') await page.getByRole('button', { name: 'New workflow' }).waitFor();
+  else await page.locator('#ask-input').waitFor();
   return page;
 }
 const emit = (page: Page, type: string, data: unknown) => page.evaluate(({ type, data }) => { (window as unknown as { askSources: Array<{ handlers: Record<string, (e: { data: string }) => void> }> }).askSources.at(-1)?.handlers[type]?.({ data: JSON.stringify(data) }); }, { type, data });
 
 describe('Ask browser interactions', () => {
+  it('shows slash hints and starts the matching workflow in the current conversation', async () => {
+    const page = await open('/c/test');
+    const workflow = { id: 'research-and-verify', name: 'Research and verify', description: 'Research and independent review', builtIn: true, triggers: ['/research'], input: { label: 'Topic', required: true }, steps: [] };
+    try {
+      let request: unknown;
+      await page.route('**/api/workflows*', r => r.fulfill({ json: { workflows: [workflow], runs: [], errors: [] } }));
+      await page.route('**/api/workflows/research-and-verify/run', r => { request = r.request().postDataJSON(); return r.fulfill({ json: { workflowRunId: 'wf', conversationId: 'test' } }); });
+      await page.reload();
+      await page.locator('#ask-input').fill('/rese');
+      await page.getByRole('button', { name: '/research · Research and verify' }).waitFor();
+      await page.locator('#ask-input').fill('/research Postgres backups');
+      await page.locator('#ask-input').press('Enter');
+      await page.waitForFunction(() => (document.querySelector('#ask-input') as HTMLTextAreaElement).value === '');
+      expect(request).toEqual({ input: 'Postgres backups', conversationId: 'test' });
+      await page.getByRole('button', { name: 'Workflows', exact: true }).click();
+      await page.getByRole('button', { name: 'Run', exact: true }).click();
+      await page.getByLabel('Topic').fill('Retention');
+      await page.getByRole('button', { name: 'Start workflow' }).click();
+      expect(request).toEqual({ input: 'Retention', conversationId: 'test' });
+    } finally { await page.close(); }
+  }, 20_000);
+  it('edits a user workflow with ordered steps and saves without a JSON editor', async () => {
+    const page = await open('/workflows');
+    try {
+      let saved: any;
+      await page.route('**/api/workflows', r => { if (r.request().method() === 'POST') { saved = r.request().postDataJSON(); return r.fulfill({ json: { workflow: saved } }); } return r.fallback(); });
+      await page.getByRole('button', { name: 'New workflow', exact: true }).click();
+      await page.getByLabel('Name', { exact: true }).fill('Weekly review');
+      await page.getByLabel('Description', { exact: true }).fill('Review notes and summarize priorities');
+      await page.getByRole('button', { name: 'Add step', exact: true }).click();
+      await page.getByRole('button', { name: 'Move step 2 up' }).click();
+      const kinds = page.getByLabel('Kind', { exact: true });
+      await kinds.nth(1).selectOption('summary');
+      await page.getByRole('button', { name: 'Save workflow', exact: true }).click();
+      await page.getByRole('button', { name: 'New workflow', exact: true }).waitFor();
+      expect(saved.name).toBe('Weekly review'); expect(saved.steps[0].id).toBe('step-2'); expect(saved.steps[1].kind).toBe('summary');
+    } finally { await page.close(); }
+  }, 20_000);
   it('blocks failed attachments, requires explicit removal and keeps the draft on server error', async () => {
     const page = await open();
     try {
