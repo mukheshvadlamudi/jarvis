@@ -15,8 +15,8 @@ import type { AgentId } from '../lib/types.ts';
 import type { PageProps } from '../routes.ts';
 
 const EXAMPLES = [
-  'What did I decide about the ClientEasy backups?',
-  'Review the auth middleware in ClientEasy and list the risks',
+  'What should I focus on today?',
+  'Review my latest code changes and list the risks',
   'Draft a short reply to Sam about the launch date',
   'Compare Plausible and Umami for a small site',
 ];

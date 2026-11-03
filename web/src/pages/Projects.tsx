@@ -214,8 +214,8 @@ function ProjectSheet({ initial, onClose, onSaved }: { initial: ProjectInfo | nu
       <div className="form-grid">
         <div className="field full">
           <label htmlFor="pj-name">Name</label>
-          <TextInput id="pj-name" value={name} onValue={setName} placeholder="ClientEasy" />
-          <span className="hint">Mention it in a task (“…in ClientEasy”) and Jarvis links the task and loads its project note.</span>
+          <TextInput id="pj-name" value={name} onValue={setName} placeholder="My app" />
+          <span className="hint">Mention it in a task (“…in My app”) and Jarvis links the task and loads its project note.</span>
         </div>
         <div className="field full">
           <span className="field-label">Kind</span>
