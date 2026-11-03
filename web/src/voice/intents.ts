@@ -21,6 +21,18 @@ export function isNoise(text: string): boolean {
   return !words || /^(you|thank you|blank audio|music|silence|inaudible)$/.test(words) || text.replace(/[^\p{L}]/gu, '').length < 2;
 }
 
+/**
+ * True when what the mic heard is Jarvis's own voice coming back from the speakers: no wake word,
+ * and at least 60% of its words appear in the line Jarvis is saying.
+ */
+export function isEcho(text: string, said: string): boolean {
+  if (!said.trim() || stripWake(text) !== null) return false;
+  const words = clean(text).split(' ').filter(Boolean);
+  if (!words.length) return false;
+  const spoken = new Set(clean(said).split(' '));
+  return words.filter((w) => spoken.has(w)).length / words.length >= 0.6;
+}
+
 /** A wake word may follow up to three fillers; preserve the command verbatim. */
 export function stripWake(text: string): string | null {
   const input = text.replace(/^[\s\p{P}\p{S}]+/u, '');
