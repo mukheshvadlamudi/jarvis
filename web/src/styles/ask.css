@@ -1,3 +1,8 @@
+/* One reading column for thread and composer: wide screens get a wide chat (prose stays readable
+   at ~90 characters; tables, code and diagrams use the full column). */
+.ask { --ask-col: 760px; }
+@media (min-width: 1280px) { .ask { --ask-col: 1000px; } }
+@media (min-width: 1600px) { .ask { --ask-col: 1180px; } }
 /* Ask: quiet instruments around a continuous reading surface.
  * Unslop direction and checklist: @heydamir, CC BY 4.0. */
 .main:has(> .ask) {
@@ -151,7 +156,7 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: var(--s6) max(var(--s5), calc((100% - 760px) / 2));
+  padding: var(--s6) max(var(--s5), calc((100% - var(--ask-col)) / 2));
   overflow-wrap: anywhere;
   scrollbar-gutter: stable both-edges;
 }
@@ -175,7 +180,7 @@
 .ask-example:hover { background: var(--bg-raised); border-color: var(--border-strong); color: var(--text); }
 .ask-loading { display: flex; align-items: center; gap: var(--s2); color: var(--text-muted); }
 .ask-composer { flex: none; padding: var(--s3) var(--s5) var(--s4); }
-.composer { max-width: 760px; margin: 0 auto; min-width: 0; }
+.composer { max-width: var(--ask-col); margin: 0 auto; min-width: 0; }
 .composer-panel { border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--bg-raised); }
 .composer-panel:focus-within { border-color: var(--border-strong); }
 .composer.dragging .composer-panel { outline: 2px dashed var(--accent); outline-offset: 4px; }
