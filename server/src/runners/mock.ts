@@ -13,13 +13,13 @@ type Step =
   | { do: 'file'; path: string; content: string }
   | { do: 'fail'; message: string };
 
-export type MockScenario = 'success' | 'approval' | 'fail' | 'long' | 'tools';
+export type MockScenario = 'success' | 'approval' | 'fail' | 'long' | 'tools' | 'limit';
 
 export function pickScenario(prompt: string): MockScenario | 'learn' | 'cron' | 'consult' {
   if (prompt.includes('[jarvis:learn]')) return 'learn';
   if (prompt.includes('[jarvis:cron]')) return 'cron';
   if (prompt.includes('[jarvis:consult]')) return 'consult';
-  const m = /\[mock:(success|approval|fail|long|tools)\]/.exec(prompt);
+  const m = /\[mock:(success|approval|fail|long|tools|limit)\]/.exec(prompt);
   if (m) return m[1] as MockScenario;
   return 'success';
 }
@@ -57,6 +57,14 @@ function stepsFor(input: RunInput, scenario: MockScenario | 'learn' | 'cron' | '
   const steps: Step[] = [];
   steps.push({ do: 'emit', event: { kind: 'status', payload: { status: 'started', detail: `Working in ${input.cwd}` } } });
 
+  if (scenario === 'limit') {
+    steps.push(msg(`Starting on: ${title}`));
+    steps.push({ do: 'file', path: 'notes.md', content: '# Half done\n' });
+    steps.push({ do: 'emit', event: { kind: 'file_change', payload: { path: 'notes.md', kind: 'add', additions: 1, deletions: 0 } } });
+    steps.push(msg('Drafted the first half in notes.md.'));
+    steps.push({ do: 'fail', message: "You've hit your usage limit. Try again at 4:30 PM." });
+    return steps;
+  }
   if (scenario === 'fail') {
     steps.push(msg(`Starting on: ${title}`));
     steps.push({ do: 'tool', tool: 'Bash', input: { command: 'npm test' }, output: 'Error: Cannot find module "./config"\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1145:15)', isError: true });

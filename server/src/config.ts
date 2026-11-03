@@ -15,6 +15,8 @@ export interface RouterConfig {
   scheduledTasks: AgentId;
   /** Plain questions on Ask: the agent with more plan room left ('headroom'), or always one agent. */
   chat: 'headroom' | AgentId;
+  /** When an agent hits its plan limit mid-task, continue the task on the other agent. */
+  switchOnLimit?: boolean;
   fallbackAtPercent: number;
 }
 
@@ -43,6 +45,7 @@ export const DEFAULT_CONFIG: JarvisConfig = {
     effortOverride: { high: 'claude' },
     scheduledTasks: 'codex',
     chat: 'headroom',
+    switchOnLimit: true,
     fallbackAtPercent: 85,
   },
   maxConcurrentRuns: 2,
