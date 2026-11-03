@@ -80,6 +80,10 @@ export interface Env {
   seed: boolean;
   mockDelayMs: number;
   telegramToken: string | null;
+  /** Gemini Live key for the voice brain (server-side only; the browser gets ephemeral tokens). */
+  geminiKey: string | null;
+  /** Optional pinned Gemini Live model; otherwise the newest native-audio Live model is picked. */
+  geminiLiveModel: string | null;
   telegramChatId: string | null;
   webDist: string;
 }
@@ -123,6 +127,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     seed: source.JARVIS_SEED ? source.JARVIS_SEED !== '0' : runner === 'mock',
     mockDelayMs: Number(source.JARVIS_MOCK_DELAY_MS ?? (runner === 'mock' && source.NODE_ENV !== 'test' && !source.VITEST ? 900 : 0)),
     telegramToken: source.TELEGRAM_BOT_TOKEN?.trim() || null,
+    geminiKey: source.GEMINI_API_KEY?.trim() || null,
+    geminiLiveModel: source.GEMINI_LIVE_MODEL?.trim() || null,
     telegramChatId: source.TELEGRAM_ALLOWED_CHAT_ID?.trim() || null,
     webDist: resolve(REPO_ROOT, 'web/dist'),
   };
