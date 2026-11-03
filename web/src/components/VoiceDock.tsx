@@ -1,102 +1,57 @@
-import { modelLoadLabel } from '../voice/loading.ts';
-import { Mic, MicOff, Square, Volume2 } from 'lucide-react';
+﻿import { useRef, useState } from 'react';
+import { ArrowUpRight, GripVertical, Mic, MicOff, Square, X } from 'lucide-react';
 import { voice, useVoice, voiceEngineStatus } from '../voice/engine.ts';
-import type { VoiceStatus } from '../voice/engine.ts';
+import { useVoiceSession, voiceSession, rememberSetting } from '../voice/live/store.ts';
+import { VoiceCore } from './voice-mode/VoiceCore.tsx';
+import { modelLoadLabel } from '../voice/loading.ts';
+import { navigate } from '../lib/router.ts';
+import { post } from '../lib/api.ts';
 
-const LABEL: Record<VoiceStatus, string> = {
-  off: 'Voice off',
-  loading: 'Waking up',
-  idle: 'Ready',
-  listening: 'Listening',
-  hearing: 'Hearing you',
-  thinking: 'Transcribing',
-  speaking: 'Speaking',
-  error: 'Voice error',
-};
-
-/** Sidebar/More toggle. One click turns hands-free voice on; after that Jarvis speaks on its own. */
 export function VoiceToggle({ compact }: { compact?: boolean }) {
-  const v = useVoice();
-  const on = v.status !== 'off' && v.status !== 'error';
-  return (
-    <button
-      className={`btn ${on ? 'voice-on' : 'ghost'} ${compact ? 'sm' : ''}`}
-      aria-pressed={on}
-      title={on ? 'Turn hands-free voice off' : 'Turn hands-free voice on (Kokoro + Whisper, runs on this device)'}
-      onClick={() => void (on ? voice.stop() : voice.start())}
-    >
-      {on ? <Mic size={16} strokeWidth={1.5} /> : <MicOff size={16} strokeWidth={1.5} />}
-      {on ? 'Voice on' : 'Voice off'}
-    </button>
-  );
+  const v = useVoice(); const session = useVoiceSession();
+  const on = session.status !== 'off' && session.status !== 'error' || v.prefs.enabled;
+  return <button className={`btn ${on ? 'voice-on' : 'ghost'} ${compact ? 'sm' : ''}`} aria-pressed={on} title="Hands-free voice" onClick={() => {
+    rememberSetting('jarvis.voice.bubble.hidden', 'false');
+    if (on) { if (voice.focusedSession) void voiceSession.end(); else void voice.stop(); }
+    else void voice.start();
+  }}>{on ? <Mic size={16} strokeWidth={1.5} /> : <MicOff size={16} strokeWidth={1.5} />}{on ? 'Voice on' : 'Voice off'}</button>;
 }
-
-function Ring({ status, level }: { status: VoiceStatus; level: number }) {
-  const active = status === 'hearing' || status === 'speaking';
-  const scale = 1 + (status === 'hearing' ? Math.min(0.35, level * 0.35) : 0);
-  return (
-    <svg className={`voice-ring ${status}`} viewBox="0 0 40 40" aria-hidden>
-      <circle cx="20" cy="20" r="17" fill="none" stroke="var(--border-strong)" strokeWidth="1" strokeDasharray="2 4" className="voice-ring-outer" />
-      <circle cx="20" cy="20" r="11" fill="none" stroke="var(--accent)" strokeWidth="2" opacity={active ? 1 : 0.55} style={{ transform: `scale(${scale})`, transformOrigin: '20px 20px', transition: 'transform 90ms linear' }} />
-      <circle cx="20" cy="20" r="5" fill="var(--accent)" opacity={status === 'listening' || status === 'idle' ? 0.6 : 1} className={active ? 'voice-core-pulse' : undefined} />
-    </svg>
-  );
+function readPosition() {
+  try { const p = JSON.parse(localStorage.getItem('jarvis.voice.bubble.position') ?? '{}'); return { x: Math.max(12, Number(p.x) || 24), y: Math.max(84, Number(p.y) || 88) }; }
+  catch { return { x: 24, y: 88 }; }
 }
-
-/** Floating HUD while voice is on: state, what it heard, what it said. */
+/** One compact surface, backed by the same session as Ask. Diagnostics are opt-in. */
 export function VoiceDock() {
-  const v = useVoice();
-  if (v.status === 'off') return null;
-  const loading = [modelLoadLabel('voice', v.loads.voice), modelLoadLabel('speech recognition', v.loads.ears)].filter(Boolean).join(' · ');
-  const hint =
-    v.needsGesture
-      ? 'Click anywhere to let Jarvis use audio'
-      : v.status === 'error'
-        ? v.error
-        : loading
-          ? loading
-          : v.status === 'listening'
-            ? v.awaiting
-              ? 'Go ahead — no need to say “Jarvis”'
-              : v.prefs.wakeWord
-                ? 'Say “Jarvis, …”'
-                : 'Listening'
-            : v.status === 'speaking'
-              ? v.said
-              : v.heard
-                ? `“${v.heard}”`
-                : '';
-  return (
-    <div className={`voice-dock ${v.status}`} title={v.micLabel ? "Using microphone: " + v.micLabel : "Microphone starting"} role="status" aria-live="polite" style={{ alignItems: 'flex-start', flexWrap: 'wrap', borderRadius: 12 }}>
-      <Ring status={v.status} level={v.level} />
-      <div className="voice-text" style={{ flex: '1 1 160px', minWidth: 0 }}>
-        <span className="voice-state">
-          {v.muted ? 'Mic muted' : LABEL[v.status]}
-        </span>
-        {v.needsGesture || v.status === 'error' ? <span className="voice-hint" style={{ whiteSpace: 'normal' }}>{hint}</span> : null}
-        {v.outcome || v.heard ? <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', maxHeight: 120, overflowY: 'auto' }}>{v.ignored ? v.outcome : [v.heard ? 'Heard: ' + v.heard : '', v.outcome].filter(Boolean).join(' \u00b7 ')}</span> : hint ? <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{hint}</span> : null}
-        <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', WebkitLineClamp: 'unset' }}>{voiceEngineStatus(v)}</span>
-        {v.micFallback ? <span className="voice-hint" style={{ whiteSpace: 'normal' }}>{v.micFallback}</span> : null}
-        {loading && (v.outcome || v.heard) ? <span className="voice-hint" style={{ whiteSpace: 'normal' }}>{loading}</span> : null}
-        {v.fallback || v.adapter ? <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', WebkitLineClamp: 'unset' }}>{[v.adapter, v.fallback].filter(Boolean).join(' \u00b7 ')}</span> : null}
-        {v.ignored ? <button className="btn ghost sm" style={{ alignSelf: 'flex-start', minHeight: 44 }} onClick={() => void voice.useHeard()}>Use it</button> : null}
-      </div>
-      {v.status === 'speaking' ? (
-        <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label="Stop speaking" title="Stop speaking (Space)" onClick={() => voice.stopSpeaking()}>
-          <Square size={16} strokeWidth={1.5} />
-        </button>
-      ) : (
-        <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label="Test voice" title="Say something" onClick={() => void voice.speak('Systems online. Say Jarvis, then what you need.')}>
-          <Volume2 size={16} strokeWidth={1.5} />
-        </button>
-      )}
-      <button className="btn ghost sm" style={{ minHeight: 44 }} onClick={() => voice.onStopAgent?.()} title="Stop the current agent run">Stop agent</button>
-      <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label={v.muted ? 'Unmute mic' : 'Mute mic'} aria-pressed={v.muted} onClick={() => voice.muteMic()}>
-        {v.muted ? <MicOff size={16} strokeWidth={1.5} /> : <Mic size={16} strokeWidth={1.5} />}
-      </button>
-      <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label="Turn voice off" title="Turn voice off" onClick={() => void voice.stop()}>
-        <MicOff size={16} strokeWidth={1.5} />
-      </button>
-    </div>
-  );
+  const v = useVoice(); const session = useVoiceSession();
+  const [expanded, setExpanded] = useState(false);
+  const [hidden, setHidden] = useState(() => localStorage.getItem('jarvis.voice.bubble.hidden') === 'true');
+  const [position, setPosition] = useState(readPosition);
+  const drag = useRef<{ x: number; y: number; right: number; bottom: number } | null>(null);
+  const shared = session.status !== 'off' && session.status !== 'error';
+  const active = shared || v.status !== 'off';
+  if (session.fullView || !active && hidden) return null;
+  const status = shared ? session.status : v.status;
+  const caption = shared ? session.output || session.input || session.lines.at(-1)?.assistant : v.status === 'speaking' ? v.said : v.heard;
+  const labels: Record<string, string> = { off: 'Voice', idle: 'Ready', listening: 'Listening', hearing: 'Listening', thinking: 'Thinking', working: 'Agent working', speaking: 'Speaking', connecting: 'Connecting', loading: 'Starting voice', error: 'Reconnect voice' };
+  const end = () => { if (shared) void voiceSession.end(); else void voice.stop(); };
+  const mute = () => { if (shared) voiceSession.mute(); else voice.muteMic(); };
+  const open = () => {
+    rememberSetting('jarvis.ask.mode', 'voice');
+    navigate(session.conversationId ? `/c/${session.conversationId}` : '/');
+    window.dispatchEvent(new Event('jarvis.open-voice'));
+  };
+  return <aside className={`voice-bubble${expanded ? ' expanded' : ''}`} style={{ right: Math.min(position.x, Math.max(12, innerWidth - (expanded ? 332 : 64))), bottom: Math.min(position.y, Math.max(84, innerHeight - (expanded ? 360 : 64))) }} aria-label="Jarvis voice">
+    {expanded ? <div className="voice-bubble-panel">
+      <div className="voice-bubble-head"><span>{labels[status]}</span><button className="btn ghost icon" aria-label="Move voice panel" onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, right: position.x, bottom: position.y }; }} onPointerMove={(e) => {
+        if (!drag.current) return;
+        setPosition({ x: Math.max(12, Math.min(innerWidth - 332, drag.current.right - e.clientX + drag.current.x)), y: Math.max(84, Math.min(innerHeight - 360, drag.current.bottom - e.clientY + drag.current.y)) });
+      }} onPointerUp={() => { drag.current = null; rememberSetting('jarvis.voice.bubble.position', JSON.stringify(position)); }} onPointerCancel={() => { drag.current = null; }}><GripVertical size={16} strokeWidth={1.5} /></button><button className="btn ghost icon" aria-label="Collapse voice panel" onClick={() => setExpanded(false)}><X size={16} strokeWidth={1.5} /></button></div>
+      <div className="voice-bubble-caption" aria-live="polite">{caption || (active ? 'Say what you need' : 'Open full voice mode to talk with Jarvis')}</div>
+      {session.error || shared && session.notice ? <p className="voice-bubble-notice">{session.error || session.notice}</p> : null}
+      <div className="voice-bubble-actions"><button className="btn ghost icon" disabled={!active} aria-label={(shared ? session.muted : v.muted) ? 'Unmute mic' : 'Mute mic'} aria-pressed={shared ? session.muted : v.muted} onClick={mute}><MicOff size={16} strokeWidth={1.5} /></button>{status === 'speaking' ? <button className="btn ghost icon" aria-label="Stop speaking" onClick={() => { if (shared) { voiceSession.pushToTalk(true); voiceSession.pushToTalk(false); } else voice.stopSpeaking(); }}><Square size={16} strokeWidth={1.5} /></button> : null}<button className="btn ghost sm" disabled={!active} onClick={end}>End</button><button className="btn ghost sm" onClick={open}>Open full voice mode <ArrowUpRight size={16} strokeWidth={1.5} /></button></div>
+      <details className="voice-details"><summary>Details</summary><p>{shared ? `${session.connection} · ${session.model || 'Local'}` : [voiceEngineStatus(v), v.micLabel, modelLoadLabel('voice', v.loads.voice), modelLoadLabel('speech recognition', v.loads.ears), v.adapter, v.fallback, v.error].filter(Boolean).join(' · ')}</p><button className="btn ghost sm" onClick={() => { if (shared && session.conversationId) void post(`/api/tasks/${session.conversationId}/cancel`).catch((error) => voiceSession.set({ error: (error as Error).message })); else voice.onStopAgent?.(); }}>Stop agent</button></details>
+      <button className="btn ghost sm voice-dismiss" onClick={() => { setHidden(true); setExpanded(false); rememberSetting('jarvis.voice.bubble.hidden', 'true'); }}>Hide when voice is off</button>
+    </div> : null}
+    <button className="voice-bubble-trigger" aria-label={expanded ? 'Collapse voice panel' : `Open voice panel · ${labels[status]}`} aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}><VoiceCore small status={status} levels={shared ? undefined : () => [v.level, voice.outputLevel]} /></button>
+  </aside>;
 }

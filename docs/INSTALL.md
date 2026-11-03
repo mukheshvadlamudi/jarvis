@@ -13,6 +13,26 @@ Jarvis is a **local app**: a small server on your computer plus its interface. T
 
 Desktop data lives in `%APPDATA%\Jarvis\data` (Windows), `~/Library/Application Support/Jarvis/data` (macOS) or `~/.config/Jarvis/data` (Linux).
 
+### Jarvis anywhere (desktop only)
+
+In **Settings → Voice → Jarvis anywhere**, enable the overlay, choose a shortcut and select **Ask Jarvis** or **Dictate**. The default is **Ctrl+Space**. If another app owns it, Jarvis tries **Ctrl+Alt+Space** and shows a warning with the active shortcut. If both are unavailable, choose another accelerator, such as `Control+Shift+Space`. These preferences are saved in `anywhere.json` in the desktop user-data folder.
+
+Tap the shortcut from another app to talk. The small overlay appears near the bottom centre of the display; **Tab** switches modes and remembers your choice, and **Esc** closes it and returns focus. You can also hold the shortcut: releasing it after opening the overlay finishes the turn once the voice engine has transcribed the last words. A short tap keeps listening; tap again or press **Finish** to finish. Speech ends a turn automatically after a pause. Allow the microphone when prompted; system microphone restrictions still apply. The existing local Whisper/VAD voice engine is reused; the first use downloads models.
+
+**Ask Jarvis** starts a conversation and continues that overlay conversation on subsequent turns. It shows a compact answer and **Open in Jarvis** opens the full thread, including any approvals. Focus returns to the previous app when the answer finishes. **Dictate** transcribes locally, saves the existing clipboard formats, copies the transcript, restores the previous app and pastes. About one second later it restores the clipboard, unless you have copied something newer. If focusing or pasting fails, the transcript stays visible for manual copying.
+
+Windows uses PowerShell and Windows Forms `SendKeys` for paste. macOS uses System Events and may require Accessibility/Automation permission for Jarvis. Linux requires `xdotool` and an X11 session; Wayland compositors can prevent focus and paste automation. The browser/PWA has no global shortcut or paste automation. Native focus, shortcut release delivery and microphone permissions should be checked on each target OS.
+
+Integration needed from the shared voice owner: subscribe to the desktop preload's `onAnywhereActive(active)` event and suspend the main window's hands-free microphone while `active` is true, then restore its previous state. Until that is connected, leave the main window's hands-free Voice off while using the overlay to avoid duplicate recognition. No shared `/overlay` route is needed: Electron serves the bundled `desktop/overlay.html` entry on the local server origin in an isolated session.
+
+### Let Claude use your Chrome (optional)
+
+1. Follow the official [Claude in Chrome installation guide](https://code.claude.com/docs/en/chrome), install the extension, and connect it to Claude Code. Use a **claude.ai plan login** through `/login`; API keys and setup tokens do not enable Chrome.
+2. Turn on **Settings → Agents → Claude can use your Chrome** and save. This sets `agents.claude.chrome` in `data/config.json` (default `false`). Each new Claude run receives the SDK option `extraArgs: { chrome: null }`, equivalent to `--chrome`.
+3. In **Setup → Install Claude in Chrome**, run the optional tiny verification after enabling the switch. It checks whether a run with the flag completes cleanly, records its result locally and never runs automatically. Mock mode does not call Claude. Successful startup does **not** prove extension connectivity: check `/chrome` in Claude Code for the installed/connected extension.
+
+You approve sites in the extension. Jarvis additionally asks before Claude in Chrome mutation tools, including `computer`, `form_input`, `javascript_tool` and `browser_batch`, because clicks, typing and scripts can submit forms, send messages or make purchases. This runner-level check applies even if Chrome was enabled in Claude Code itself and forces risky calls through Jarvis approval hooks. Read-only page/context tools remain available. The extension's per-site permission is a separate control; review it before granting sensitive sites. No real Chrome run is made by automated tests.
+
 ## Option B — From the source folder (launcher or browser app)
 
 ## What a person needs

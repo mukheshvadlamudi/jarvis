@@ -15,6 +15,8 @@ export interface RouterConfig {
   scheduledTasks: AgentId;
   /** Plain questions on Ask: the agent with more plan room left ('headroom'), or always one agent. */
   chat: 'headroom' | AgentId;
+  /** When an agent hits its plan limit mid-task, continue the task on the other agent. */
+  switchOnLimit?: boolean;
   fallbackAtPercent: number;
 }
 
@@ -30,7 +32,7 @@ export interface JarvisConfig {
   telegram: { enabled: boolean };
   /** Per-agent harness settings. Empty strings mean "use the CLI's own default". */
   agents: {
-    claude: { model: string; effort: { low: string; medium: string; high: string } };
+    claude: { model: string; chrome: boolean; effort: { low: string; medium: string; high: string } };
     codex: { model: string; effort: { low: string; medium: string; high: string } };
   };
   collaboration: { maxConsultsPerTask: number; autoHandoffReview: boolean };
@@ -43,6 +45,7 @@ export const DEFAULT_CONFIG: JarvisConfig = {
     effortOverride: { high: 'claude' },
     scheduledTasks: 'codex',
     chat: 'headroom',
+    switchOnLimit: true,
     fallbackAtPercent: 85,
   },
   maxConcurrentRuns: 2,
@@ -54,7 +57,7 @@ export const DEFAULT_CONFIG: JarvisConfig = {
   feeds: { fetchEveryHours: 6 },
   telegram: { enabled: true },
   agents: {
-    claude: { model: '', effort: { low: 'low', medium: '', high: 'high' } },
+    claude: { model: '', chrome: false, effort: { low: 'low', medium: '', high: 'high' } },
     codex: { model: '', effort: { low: 'low', medium: '', high: 'high' } },
   },
   collaboration: { maxConsultsPerTask: 2, autoHandoffReview: false },
@@ -80,6 +83,10 @@ export interface Env {
   seed: boolean;
   mockDelayMs: number;
   telegramToken: string | null;
+  /** Gemini Live key for the voice brain (server-side only; the browser gets ephemeral tokens). */
+  geminiKey: string | null;
+  /** Optional pinned Gemini Live model; otherwise the newest native-audio Live model is picked. */
+  geminiLiveModel: string | null;
   telegramChatId: string | null;
   webDist: string;
 }
@@ -123,6 +130,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     seed: source.JARVIS_SEED ? source.JARVIS_SEED !== '0' : runner === 'mock',
     mockDelayMs: Number(source.JARVIS_MOCK_DELAY_MS ?? (runner === 'mock' && source.NODE_ENV !== 'test' && !source.VITEST ? 900 : 0)),
     telegramToken: source.TELEGRAM_BOT_TOKEN?.trim() || null,
+    geminiKey: source.GEMINI_API_KEY?.trim() || null,
+    geminiLiveModel: source.GEMINI_LIVE_MODEL?.trim() || null,
     telegramChatId: source.TELEGRAM_ALLOWED_CHAT_ID?.trim() || null,
     webDist: resolve(REPO_ROOT, 'web/dist'),
   };

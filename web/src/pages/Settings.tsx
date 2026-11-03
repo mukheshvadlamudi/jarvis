@@ -9,6 +9,7 @@ import { setTheme, useTheme } from '../lib/theme.ts';
 import type { ThemePref } from '../lib/theme.ts';
 import { toast } from '../lib/toast.ts';
 import { VoiceSettings } from '../components/VoiceSettings.tsx';
+import { desktop } from '../lib/desktop.ts';
 
 type Agent = 'claude' | 'codex';
 interface Config {
@@ -21,7 +22,7 @@ interface Config {
   classifier: { useAgent: boolean };
   feeds: { fetchEveryHours: number };
   telegram: { enabled: boolean };
-  agents: Record<Agent, { model: string; effort: Record<'low' | 'medium' | 'high', string> }>;
+  agents: Record<Agent, { model: string; chrome?: boolean; effort: Record<'low' | 'medium' | 'high', string> }>;
   collaboration: { maxConsultsPerTask: number; autoHandoffReview: boolean };
 }
 interface SettingsResponse {
@@ -58,6 +59,42 @@ const EFFORTS: Record<Agent, Array<{ value: string; label: string }>> = {
   ],
 };
 const LEVELS = ['low', 'medium', 'high'] as const;
+
+interface AnywherePrefs { enabled: boolean; shortcut: string; mode: 'ask' | 'dictate'; registered: string | null; warning: string }
+const anywhere = desktop as typeof desktop & { anywhereSettings?: (patch?: Partial<AnywherePrefs>) => Promise<AnywherePrefs> };
+
+function AnywhereSettings() {
+  const [prefs, setPrefs] = useState<AnywherePrefs | null>(null);
+  const [shortcut, setShortcut] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    void anywhere?.anywhereSettings?.().then((value) => { setPrefs(value); setShortcut(value.shortcut); }).catch((e: Error) => setError(e.message));
+  }, []);
+  if (!anywhere?.anywhereSettings) return null;
+  const update = async (patch: Partial<AnywherePrefs>) => {
+    setSaving(true); setError('');
+    try { setPrefs(await anywhere.anywhereSettings!(patch)); }
+    catch (e) { setError((e as Error).message); }
+    finally { setSaving(false); }
+  };
+  return <section className="panel" aria-label="Jarvis anywhere">
+    <div className="panel-head"><h2>Jarvis anywhere</h2><span className="faint" style={{ fontSize: 12 }}>Voice · desktop only</span></div>
+    {prefs ? <>
+      <Row label="Talk from any app" hint="Tap the shortcut to talk; Tab switches between Ask Jarvis and Dictate">
+        <Switch label="Enable Jarvis anywhere" checked={prefs.enabled} onChange={(enabled) => { if (!saving) void update({ enabled }); }} />
+      </Row>
+      <Row label="Global shortcut" hint={prefs.warning || `Active shortcut: ${prefs.registered ?? 'disabled'}`}>
+        <input className="input mono" style={{ width: 192 }} aria-label="Jarvis anywhere shortcut" value={shortcut} onChange={(e) => setShortcut(e.target.value)} placeholder="Control+Space" />
+        <button className="btn sm" disabled={saving || shortcut === prefs.shortcut || !shortcut.trim()} onClick={() => void update({ shortcut })}>Apply</button>
+      </Row>
+      <Row label="Default mode" hint="Tab changes are remembered for the next time you open the overlay">
+        <Segmented label="Jarvis anywhere mode" value={prefs.mode} options={[{ value: 'ask', label: 'Ask Jarvis' }, { value: 'dictate', label: 'Dictate' }]} onChange={(mode) => { if (!saving) void update({ mode }); }} />
+      </Row>
+    </> : <div className="panel-body"><Skeleton w="60%" /></div>}
+    {error ? <div className="panel-body" role="alert">{error}</div> : null}
+  </section>;
+}
 
 const AGENTS = [
   { value: 'claude' as const, label: 'Claude' },
@@ -250,6 +287,9 @@ export default function Settings() {
                 </Row>
               </div>
             ))}
+            <Row label="Claude can use your Chrome" hint="Claude in Chrome extension; you approve sites in the extension">
+              <Switch label="Claude can use your Chrome" checked={cfg.agents.claude.chrome ?? false} onChange={(chrome) => set((c) => void (c.agents.claude.chrome = chrome))} />
+            </Row>
           </section>
 
           <section className="panel">
@@ -306,6 +346,7 @@ export default function Settings() {
           </section>
 
           <VoiceSettings />
+          <AnywhereSettings />
 
           <section className="panel">
             <div className="panel-head">

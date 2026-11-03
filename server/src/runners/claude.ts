@@ -12,7 +12,9 @@ import type {
   SDKRateLimitInfo,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { ConfigStore, REPO_ROOT } from '../config.ts';
 import { classifyToolCall, humanSummary } from '../approvals/policy.ts';
 import { sanitizedAgentEnv } from '../util/env.ts';
 import type { AgentRunner, RunEventSink, RunHandle, RunInput, RunResult } from './types.ts';
@@ -29,6 +31,7 @@ export type QueryFn = (params: { prompt: string | AsyncIterable<SDKUserMessage>;
 export interface ClaudeRunnerDeps {
   queryFn?: QueryFn;
   env?: NodeJS.ProcessEnv;
+  chrome?: () => boolean;
 }
 
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
@@ -91,12 +94,18 @@ export function buildClaudePrompt(input: RunInput): string | AsyncIterable<SDKUs
 const ADAPTIVE = /^(default|opus|sonnet|fable|haiku)$|^claude-(opus|sonnet|fable|haiku)-[5-9]/;
 
 /** Build the SDK options for one run. Exported for unit tests. */
-export function buildClaudeOptions(input: RunInput, sink: RunEventSink, abortController: AbortController, env: NodeJS.ProcessEnv): Options {
+export function buildClaudeOptions(input: RunInput, sink: RunEventSink, abortController: AbortController, env: NodeJS.ProcessEnv, chrome = false): Options {
   const readOnly = input.sandbox === 'read-only';
 
   const policyFor = (toolName: string, toolInput: Record<string, unknown>) => {
     if (readOnly && WRITE_TOOLS.has(toolName)) {
       return { level: 'block' as const, kind: 'read_only', reason: 'this task runs read-only' };
+    }
+    // A click, keystroke, script or batch can submit outward data. Gate all browser mutations;
+    // the extension's per-site permissions remain an additional control.
+    if (/^mcp__claude[-_]in[-_]chrome__/.test(toolName) &&
+        !/(?:__)(read_page|find|read_console_messages|read_network_requests|tabs_context_mcp|get_page_text)$/.test(toolName)) {
+      return { level: 'ask' as const, kind: 'browser_action', reason: 'browser input can submit forms, send messages or make purchases' };
     }
     return classifyToolCall({ tool: toolName, input: toolInput, cwd: input.cwd, vault: input.vaultPath });
   };
@@ -136,6 +145,7 @@ export function buildClaudeOptions(input: RunInput, sink: RunEventSink, abortCon
   }
 
   return {
+    ...(chrome ? { extraArgs: { chrome: null } } : {}),
     cwd: input.cwd,
     resume: input.resumeSessionId,
     abortController,
@@ -175,7 +185,14 @@ export function createClaudeRunner(deps: ClaudeRunnerDeps = {}): AgentRunner {
         const toolNames = new Map<string, string>();
         try {
           const queryFn = deps.queryFn ?? (await loadQuery());
-          const options = buildClaudeOptions(input, sink, abortController, deps.env ?? process.env);
+          const env = deps.env ?? process.env;
+          const dataDir = resolve(REPO_ROOT, env.JARVIS_DATA_DIR || 'data');
+          const chrome = deps.chrome?.() ?? (!deps.queryFn && new ConfigStore(dataDir).get().agents.claude.chrome);
+          const options = buildClaudeOptions(input, sink, abortController, env, chrome);
+          if (input.taskId === 'verify' && chrome && !deps.queryFn) {
+            mkdirSync(dataDir, { recursive: true });
+            writeFileSync(join(dataDir, 'chrome-check.json'), JSON.stringify({ checkedAt: new Date().toISOString(), ok: false }));
+          }
           q = queryFn({ prompt: buildClaudePrompt(input), options });
           for await (const m of q) {
             if (m.type === 'system' && m.subtype === 'init') {
@@ -251,6 +268,11 @@ export function createClaudeRunner(deps: ClaudeRunnerDeps = {}): AgentRunner {
           }
           if (cancelled) return { status: 'cancelled', summary: 'Cancelled by you.', sessionId, usage, toolCalls };
           const summary = (finalText || lastAssistantText || 'Finished.').trim();
+          // Setup's existing tiny verification run also verifies startup with --chrome.
+          if (input.taskId === 'verify' && chrome && !deps.queryFn) {
+            mkdirSync(dataDir, { recursive: true });
+            writeFileSync(join(dataDir, 'chrome-check.json'), JSON.stringify({ checkedAt: new Date().toISOString(), ok: true }));
+          }
           return { status: 'done', summary, sessionId, usage, toolCalls };
         } catch (err) {
           if (cancelled || abortController.signal.aborted) return { status: 'cancelled', summary: 'Cancelled by you.', sessionId, usage, toolCalls };

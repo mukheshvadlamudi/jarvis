@@ -29,7 +29,7 @@ export interface Task {
 export interface Run {
   id: string;
   task_id: string;
-  agent: AgentId | 'mock';
+  agent: AgentId | 'mock' | 'gemini';
   session_id: string | null;
   cwd: string;
   started_at: string;

@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Jarvis anywhere</title>
+<link rel="stylesheet" href="./overlay.css"></head>
+<body><main aria-label="Jarvis anywhere">
+  <header><div role="group" aria-label="Voice mode"><button id="ask" aria-pressed="true">Ask Jarvis</button><button id="dictate" aria-pressed="false">Dictate</button></div><button id="close" aria-label="Close overlay">Esc</button></header>
+  <p id="status" role="status">Ready to listen</p>
+  <p id="transcript"></p><p id="answer" aria-live="polite"></p>
+  <footer><span>Tab switches mode</span><button id="finish">Finish</button><button id="open" hidden>Open in Jarvis</button></footer>
+</main><script type="module" src="./overlay.ts"></script></body></html>

@@ -1,4 +1,5 @@
 import { BarChart, LineChart } from '../components/Charts.tsx';
+import { VoiceUsage } from '../components/voice-mode/VoiceMode.tsx';
 import type { UsageResponse } from '../components/UsageMeters.tsx';
 import { UsageMeters } from '../components/UsageMeters.tsx';
 import { AgentBadge, Empty, ErrorBox, Link, PageHead, Segmented, Skeleton, StatusLabel } from '../components/ui.tsx';
@@ -33,6 +34,7 @@ export default function Usage() {
           ]}
         />
       </PageHead>
+      <VoiceUsage />
       {res.error ? <ErrorBox error={res.error} onRetry={res.reload} /> : null}
 
       <div className="grid-2">

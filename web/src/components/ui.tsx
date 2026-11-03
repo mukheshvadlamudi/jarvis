@@ -27,9 +27,9 @@ export function Link(props: { to: string; className?: string; children: ReactNod
   );
 }
 
-export function AgentBadge({ agent, reason }: { agent: AgentId | 'mock' | null | undefined; reason?: string | null }) {
+export function AgentBadge({ agent, reason }: { agent: AgentId | 'mock' | 'gemini' | null | undefined; reason?: string | null }) {
   if (!agent) return <span className="agent none">Unassigned</span>;
-  const name = agent === 'claude' ? 'Claude' : agent === 'codex' ? 'Codex' : 'Mock';
+  const name = agent === 'claude' ? 'Claude' : agent === 'codex' ? 'Codex' : agent === 'gemini' ? 'Jarvis (voice)' : 'Mock';
   return (
     <span className={`agent ${agent}`} title={reason ? `Routing: ${reason}` : undefined}>
       <span className="dot" aria-hidden />

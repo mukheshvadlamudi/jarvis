@@ -37,7 +37,12 @@ interface StartOptions extends AskOptions {
   resumeSessionId?: string;
   /** Overrides the route reason shown on the run. */
   reason?: string;
+  /** Use `agent` as given (a limit handover), instead of routing. */
+  forceAgent?: boolean;
 }
+
+/** An agent stopped because its plan window is used up (Claude and Codex wording, plus HTTP 429). */
+export const LIMIT_ERROR = /usage limit|rate[_ ]?limit|limit (?:reached|exceeded)|hit your (?:usage )?limit|out of (?:usage|credits)|quota|too many requests|\b429\b/i;
 
 /** Added to a conversation's context so agents answer like an assistant, not a batch job. */
 const CHAT_GUIDE = `
@@ -257,7 +262,9 @@ export class Orchestrator {
     const t = this.d.tasks.get(taskId);
     if (!t) throw new Error('not_found');
     const last = this.lastRun(taskId);
-    const agent = opts.agent ?? (last?.agent as AgentId | undefined);
+    // Stay with the agent that answered last; a voice turn (Gemini) is not an agent, so route normally.
+    const lastAgent = last?.agent === 'claude' || last?.agent === 'codex' ? last.agent : undefined;
+    const agent = opts.agent ?? lastAgent;
     const contaminated = last?.session_id && get(this.d.db, "SELECT id FROM runs WHERE task_id = ? AND session_id = ? AND visibility = 'internal' LIMIT 1", taskId, last.session_id);
     const same = !!last && last.agent === agent && !!last.session_id && !contaminated;
     if (t.status !== 'queued') this.d.tasks.setStatus(taskId, 'queued', { not_before: null });
@@ -281,7 +288,7 @@ export class Orchestrator {
   history(taskId: string): string {
     const runs = all<Run>(this.d.db, "SELECT * FROM runs WHERE task_id = ? AND status = 'done' AND visibility = 'conversation' AND purpose IN ('user_reply', 'both', 'second_opinion', 'handoff') ORDER BY started_at, rowid", taskId);
     const who = (r: Run) => {
-      const name = r.agent === 'claude' ? 'Claude' : r.agent === 'codex' ? 'Codex' : r.agent;
+      const name = r.agent === 'claude' ? 'Claude' : r.agent === 'codex' ? 'Codex' : r.agent === 'gemini' ? 'Jarvis (voice)' : r.agent;
       return r.purpose === 'both' || r.purpose === 'second_opinion' ? `${name} (${r.purpose})` : name;
     };
     const turns: string[] = [];
@@ -328,7 +335,7 @@ export class Orchestrator {
     const cfg = this.d.config.get();
     let agent: AgentId;
     let reason: string;
-    if (opts.agent && (opts.resumeSessionId || task.mode === 'chat')) {
+    if (opts.agent && (opts.resumeSessionId || task.mode === 'chat' || opts.forceAgent)) {
       agent = opts.agent;
       reason = opts.reason ?? `follow-up resumes ${agent} session`;
     } else {
@@ -523,6 +530,7 @@ export class Orchestrator {
     }
     const finished = this.getRun(runId)!;
     this.d.bus.publish('run.finished', finished);
+    if (result.status === 'failed' && LIMIT_ERROR.test(`${result.error ?? ''} ${result.summary}`)) await this.switchOnLimit(taskId, finished, workdir);
     const task = this.d.tasks.get(taskId);
     if (task && finished.visibility !== 'internal') {
       for (const h of this.afterRun) {
@@ -541,6 +549,61 @@ export class Orchestrator {
     const project = task.project_id ? get<Project>(this.d.db, 'SELECT * FROM projects WHERE id = ?', task.project_id) : undefined;
     const ctx = await this.context.build(task, project);
     return `${ctx.prefix}${CHAT_GUIDE}`;
+  }
+
+  /**
+   * The agent ran out of plan mid-task: mark it limited (the router then avoids it until the reset)
+   * and continue the same task on the other agent, in the same folder, with what was done so far.
+   * One handover per run chain, never back and forth; if both are limited the task waits.
+   */
+  private async switchOnLimit(taskId: string, failed: Run, workdir: Workdir): Promise<void> {
+    const from = failed.agent === 'codex' ? 'codex' : failed.agent === 'claude' ? 'claude' : null;
+    if (!from || failed.purpose && failed.purpose !== 'user_reply' && failed.purpose !== 'handoff') return;
+    const resetAt = new Date(Date.now() + 60 * 60_000).toISOString();
+    this.d.usage.recordReading({ agent: from, window: 'five_hour', usedPercent: 100, resetsAt: resetAt, source: 'limit-hit' });
+    const to: AgentId = from === 'claude' ? 'codex' : 'claude';
+    const task = this.d.tasks.get(taskId);
+    if (!task || this.d.config.get().router.switchOnLimit === false) return;
+    if ((failed.route_reason ?? '').startsWith('limit handover')) {
+      this.d.tasks.setStatus(taskId, 'failed', { result_summary: 'Both Claude and Codex have reached their plan limits. Send it again after a reset (see Agents for the times).' });
+      return;
+    }
+    const other = this.d.usage.current()[to];
+    const threshold = this.d.config.get().router.fallbackAtPercent;
+    if ([other.five_hour, other.weekly].some((w) => w && w.usedPercent >= threshold)) {
+      this.d.tasks.setStatus(taskId, 'failed', { result_summary: `${from === 'claude' ? 'Claude' : 'Codex'} reached its plan limit, and ${to === 'claude' ? 'Claude' : 'Codex'} is near its limit too. Send it again after a reset.` });
+      return;
+    }
+    const files = all<{ payload_json: string }>(this.d.db, "SELECT payload_json FROM run_events WHERE run_id = ? AND kind = 'file_change'", failed.id)
+      .map((e) => String((JSON.parse(e.payload_json) as { path?: string }).path ?? '')).filter(Boolean);
+    const progress = get<{ payload_json: string }>(this.d.db, "SELECT payload_json FROM run_events WHERE run_id = ? AND kind = 'message' ORDER BY id DESC LIMIT 1", failed.id);
+    const lastNote = progress ? String((JSON.parse(progress.payload_json) as { text?: string }).text ?? '').slice(0, 1500) : '';
+    const asked = failed.owner_text ?? failed.prompt ?? task.title;
+    const name = from === 'claude' ? 'Claude' : 'Codex';
+    const note = [
+      `${name} reached its plan limit part-way through this request, so you are taking over. Continue from where it stopped; do not start over.`,
+      files.length ? `It already changed these files in the working folder: ${[...new Set(files)].slice(0, 30).join(', ')}.` : '',
+      lastNote ? `Its last progress note:\n${lastNote}` : '',
+      `The request:\n${asked}`,
+    ].filter(Boolean).join('\n\n');
+    const reason = `limit handover: ${from} → ${to}`;
+    log.info(`${taskId}: ${from} hit its plan limit; continuing on ${to}`);
+    this.d.bus.publish('notify', { message: `${name} reached its plan limit; ${to === 'claude' ? 'Claude' : 'Codex'} is continuing the task.`, level: 'info', taskId, taskTitle: task.title });
+    if (task.mode === 'chat') {
+      await this.ask(taskId, note, { agent: to }).catch((err) => log.warn('limit handover failed', err));
+      const r = this.lastRun(taskId);
+      if (r) run(this.d.db, 'UPDATE runs SET route_reason = ?, owner_text = ? WHERE id = ?', reason, failed.owner_text ?? null, r.id);
+      return;
+    }
+    this.d.tasks.setStatus(taskId, 'queued', { not_before: null });
+    this.starting.add(taskId);
+    try {
+      this.workdirHooks.unshift((t) => (t.id === taskId ? workdir : null));
+      await this.startRun(this.d.tasks.get(taskId)!, { prompt: note, agent: to, forceAgent: true, reason });
+    } finally {
+      this.workdirHooks.shift();
+      this.starting.delete(taskId);
+    }
   }
 
   getRun(id: string): Run | undefined {

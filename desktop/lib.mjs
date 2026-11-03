@@ -80,3 +80,27 @@ export function parseSse(buffer) {
   }
   return { events, rest };
 }
+
+/** Electron can reject malformed accelerators as well as occupied ones. */
+export function registerAnywhereShortcut(register, requested, callback) {
+  const candidates = [...new Set([requested, 'Control+Alt+Space'])];
+  for (const shortcut of candidates) {
+    try {
+      if (register(shortcut, callback)) return { shortcut, warning: shortcut === requested ? '' : `${requested} is unavailable. Jarvis anywhere now uses ${shortcut}.` };
+    } catch { /* try the fallback */ }
+  }
+  return { shortcut: null, warning: 'Jarvis anywhere could not register either shortcut. Choose another in Settings → Voice.' };
+}
+
+/** Keep the clipboard transaction ordered, including failures, and do not overwrite a newer copy. */
+export async function pasteWithClipboard(text, { save, write, restoreFocus, paste, delay, unchanged, restore }) {
+  const previous = await save();
+  await write(text);
+  try {
+    await restoreFocus();
+    await paste();
+    await delay(1000);
+  } finally {
+    if (await unchanged(text)) await restore(previous);
+  }
+}

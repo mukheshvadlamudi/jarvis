@@ -329,6 +329,10 @@ export default function Setup() {
                     {c.title} {!c.required ? <span className="faint" style={{ fontWeight: 400, fontSize: 12 }}>· optional</span> : null}
                   </h3>
                   <p>{c.detail}</p>
+                  {c.id === 'claude-chrome' ? <>
+                    <a className="btn sm" href="https://code.claude.com/docs/en/chrome" target="_blank" rel="noreferrer" style={{ marginTop: 8 }}>Install Claude in Chrome</a>
+                    <VerifyAction agent="claude" mock={d.runner === 'mock'} onDone={res.reload} />
+                  </> : null}
                   {c.state !== 'ok' && desktop && (c.id === 'claude' || c.id === 'codex') ? (
                     <button
                       className="btn primary sm"

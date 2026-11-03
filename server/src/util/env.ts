@@ -10,7 +10,8 @@ export function sanitizedAgentEnv(source: NodeJS.ProcessEnv = process.env, extra
   for (const [k, v] of Object.entries(source)) {
     if (v === undefined) continue;
     if ((BILLING_KEYS as readonly string[]).includes(k)) continue;
-    if (k.startsWith('JARVIS_ACCESS_TOKEN') || k === 'TELEGRAM_BOT_TOKEN') continue;
+    // Jarvis's own secrets: the Gemini voice key is for the voice brain only, never for agents.
+    if (k.startsWith('JARVIS_ACCESS_TOKEN') || k === 'TELEGRAM_BOT_TOKEN' || k === 'GEMINI_API_KEY' || k === 'GOOGLE_API_KEY') continue;
     out[k] = v;
   }
   for (const [k, v] of Object.entries(extra)) {

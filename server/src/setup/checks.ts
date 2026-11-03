@@ -94,6 +94,18 @@ export async function runChecks(s: Services): Promise<Check[]> {
     action: 'verify-claude',
   });
 
+  let chromeCheck: { ok?: boolean; checkedAt?: string } = {};
+  try { chromeCheck = JSON.parse(readFileSync(join(s.env.dataDir, 'chrome-check.json'), 'utf8')); } catch { /* not verified yet */ }
+  const chrome = s.config.get().agents.claude.chrome;
+  checks.push({
+    id: 'claude-chrome', title: 'Install Claude in Chrome', required: false,
+    state: chrome && chromeCheck.ok ? 'ok' : chrome && chromeCheck.checkedAt ? 'warn' : 'optional',
+    detail: !chrome ? 'Optional: install and connect the extension, enable Chrome in Settings → Agents, then verify startup here.'
+      : chromeCheck.ok ? `A run with --chrome completed cleanly (${chromeCheck.checkedAt}). This checks startup, not the extension connection; check /chrome in Claude Code.`
+      : chromeCheck.checkedAt ? 'The last --chrome verification did not finish cleanly. Check your Claude login and extension, then retry.'
+      : 'Chrome is enabled. Verify that a run with --chrome starts cleanly. You approve sites in the extension; outward actions still need Jarvis approval.',
+  });
+
   const codexHome = process.env.CODEX_HOME || join(home, '.codex');
   const codexLogin = existsSync(join(codexHome, 'auth.json'));
   const codexVerified = getSetting<string | null>(s.db, 'setup.verified.codex', null);
