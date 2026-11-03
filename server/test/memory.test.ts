@@ -163,3 +163,15 @@ describe('Windows line endings', () => {
     expect(parseFrontmatter(crlf).data.follow_up).toBe('2026-11-04');
   });
 });
+
+describe('approval policy path normalisation', () => {
+  it('requires approval however the protected path is spelled', async () => {
+    const { needsApproval } = await import('../src/memory/proposals.ts');
+    for (const p of ['CORE.md', './CORE.md', 'core.md', '/Core.md', 'Inbox/../CORE.md', '.\\CORE.md', 'projects/x.md', './People/a.md', 'AREAS\\b.md']) {
+      expect(needsApproval(p, 'append'), p).toBe(true);
+    }
+    expect(needsApproval('Inbox.md', 'append')).toBe(false);
+    expect(needsApproval('./research/x.md', 'replace')).toBe(false);
+    expect(needsApproval('Notes/x.md', 'replace')).toBe(true);
+  });
+});

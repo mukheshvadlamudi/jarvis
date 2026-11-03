@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import type { Db } from '../db/index.ts';
 import { all, get, run } from '../db/index.ts';
 import type { EventBus } from '../events.ts';
@@ -25,10 +25,17 @@ export interface MemoryProposal {
 
 const hash = (s: string) => createHash('sha1').update(s).digest('hex');
 
+/** Vault-relative path, normalised and lowercased, so './CORE.md' or 'core.md' can't skip the policy. */
+export function policyKey(target: string): string {
+  const t = posix.normalize(target.trim().replace(/\\/g, '/') || '.');
+  return t.replace(/^(?:\.\/|\/)+/, '').toLowerCase();
+}
+
 /** Notes whose edits always need the owner's approval. */
 export function needsApproval(target: string, mode: 'append' | 'replace'): boolean {
-  if (target === 'CORE.md' || /^(Projects|People|Areas)\//.test(target)) return true;
-  return mode === 'replace' && !target.startsWith('Research/');
+  const t = policyKey(target);
+  if (t === 'core.md' || /^(projects|people|areas)\//.test(t)) return true;
+  return mode === 'replace' && !t.startsWith('research/');
 }
 
 function localDate(d = new Date()): string {
@@ -54,10 +61,10 @@ export class MemoryProposals {
   }
 
   normalizeTarget(target: string): string {
-    let t = target.trim().replace(/\\/g, '/').replace(/^\/+/, '');
-    if (!t) t = 'Inbox.md';
+    let t = posix.normalize(target.trim().replace(/\\/g, '/') || '.').replace(/^(?:\.\/|\/)+/, '');
+    if (!t || t === '.') t = 'Inbox.md';
     if (!t.toLowerCase().endsWith('.md')) t += '.md';
-    if (t.startsWith('Skills/')) throw new Error('Skills are changed through skill proposals, not save_memory');
+    if (t.toLowerCase().startsWith('skills/')) throw new Error('Skills are changed through skill proposals, not save_memory');
     this.vault.resolve(t); // throws if it escapes the vault
     return t;
   }
