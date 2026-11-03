@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+import { modelLoadLabel } from '../voice/loading.ts';
 import { Download, Play } from 'lucide-react';
 import { Segmented, Switch } from './ui.tsx';
 import { VOICES, voice, useVoice, voiceEngineStatus } from '../voice/engine.ts';
@@ -29,7 +31,27 @@ const SPEAK: Array<{ key: keyof VoicePrefs['speak']; label: string }> = [
 export function VoiceSettings() {
   const v = useVoice();
   const p = v.prefs;
-  const downloading = (v.progress.voice > 0 && v.progress.voice < 100) || (v.progress.ears > 0 && v.progress.ears < 100);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [micError, setMicError] = useState('');
+  useEffect(() => {
+    let active = true;
+    const media = navigator.mediaDevices;
+    const refresh = () => void media?.enumerateDevices().then((all) => { if (active) setDevices(all.filter((d) => d.kind === 'audioinput')); }).catch(() => { if (active) setMicError('Could not list microphones'); });
+    refresh();
+    media?.addEventListener('devicechange', refresh);
+    void navigator.storage?.persisted().then((persisted) => { if (active && voice.state.persisted === null) voice.setPersistenceStatus(persisted); }).catch(() => undefined);
+    return () => { active = false; media?.removeEventListener('devicechange', refresh); };
+  }, [v.micLabel]);
+  const allowMic = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      setDevices((await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput'));
+      setMicError('');
+    } catch { setMicError('Microphone access was blocked. Allow it in browser or system settings, then try again'); }
+  };
+  const loadingLabel = [modelLoadLabel('voice', v.loads.voice), modelLoadLabel('speech recognition', v.loads.ears)].filter(Boolean).join(' · ');
+  const downloading = !!loadingLabel;
   const ready = (p.engine === 'system' || v.progress.voice === 100) && v.progress.ears === 100;
   return (
     <section className="panel">
@@ -42,11 +64,33 @@ export function VoiceSettings() {
       <Line label="Hands-free voice" hint="Jarvis listens for its name and speaks updates by itself. Nothing leaves this device and no credits are used.">
         <VoiceToggle />
       </Line>
+      <Line label="Microphone" hint={v.micLabel ? 'Using: ' + v.micLabel : 'Choose a microphone, then turn voice on to check its input'}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: 300, maxWidth: '100%' }}>
+          <select className="input" aria-label="Microphone" value={p.micId} onChange={(e) => voice.setPrefs({ micId: e.target.value })} style={{ flex: 1, width: 0, minWidth: 0 }}>
+            <option value="">System default</option>
+            {p.micId && !devices.some((d) => d.deviceId === p.micId) ? <option value={p.micId}>Saved microphone (unavailable)</option> : null}
+            {devices.filter((d) => d.deviceId && d.deviceId !== 'default').map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Microphone ' + (i + 1)}</option>)}
+          </select>
+          {p.enabled ? <div role="meter" aria-label="Microphone input level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(v.level * 100)} style={{ width: 64, flexShrink: 0, height: 8, borderRadius: 4, background: 'var(--bg-active)', overflow: 'hidden' }}>
+            <div style={{ height: '100%', background: 'var(--text-muted)', transform: `scaleX(${v.level})`, transformOrigin: 'left' }} />
+          </div> : null}
+        </div>
+      </Line>
+      {!devices.some((d) => d.label) ? <Line label="Allow the mic to see device names">
+        <button className="btn ghost sm" style={{ minHeight: 44 }} onClick={() => void allowMic()}>Allow microphone</button>
+      </Line> : null}
+      {micError || v.micFallback ? <Line label="Microphone status" hint={micError || v.micFallback}>{null}</Line> : null}
+      <Line label="Mic sensitivity" hint="High detects quieter speech and shorter phrases">
+        <Segmented<VoicePrefs['micSensitivity']> label="Mic sensitivity" value={p.micSensitivity} onChange={(micSensitivity) => voice.setPrefs({ micSensitivity })} options={[{ value: 'normal', label: 'Normal' }, { value: 'high', label: 'High' }]} />
+      </Line>
+      <Line label="Noise suppression" hint="Turn off if quiet or distant speech gets clipped">
+        <Switch label="Noise suppression" checked={p.noiseSuppression} onChange={(noiseSuppression) => voice.setPrefs({ noiseSuppression })} />
+      </Line>
       <Line
         label="Voice engine"
         hint={
           p.engine === 'kokoro'
-            ? 'Kokoro 82M — natural neural voice. Best quality uses a larger fp32 model and more memory. Fastest with a graphics card; memory is freed when voice is off.'
+            ? 'Kokoro 82M — natural neural voice. Best quality uses a larger fp32 model and more memory. Fastest with a graphics card.'
             : 'Your operating system’s voice — instant and uses no extra memory, but sounds more robotic. Pick a “Natural”/“Enhanced” voice in your OS settings for the best result.'
         }
       >
@@ -63,7 +107,7 @@ export function VoiceSettings() {
       <Line label="Voice status" hint={[voiceEngineStatus(v), v.adapter, v.fallback].filter(Boolean).join(' \u00b7 ')}>
         {p.engine === 'kokoro' && v.natural === 'failed' ? <button className="btn ghost sm" onClick={() => voice.retryVoice()}>Retry loading</button> : null}
       </Line>
-      {p.engine === 'kokoro' ? <Line label="Voice quality" hint="Best uses fp32 on your graphics card when available, or on CPU. Light uses q8 on CPU to save memory.">
+      {p.engine === 'kokoro' ? <Line label="Voice quality" hint="Best uses a separate 326 MB fp32 file, so switching from the older q8 model needs one download. Light uses q8 on CPU to save memory.">
         <select className="input" aria-label="Voice quality" value={p.voiceQuality} onChange={(e) => voice.setPrefs({ voiceQuality: e.target.value as VoicePrefs['voiceQuality'] })} style={{ width: '100%', maxWidth: 300 }}>
           <option value="best">Best (graphics card if available)</option>
           <option value="light">Light (less memory)</option>
@@ -94,7 +138,7 @@ export function VoiceSettings() {
       <Line label="Wake word" hint="On: only what you say with “Jarvis” near the start is acted on (right after Jarvis speaks you can reply without it). Off: everything you say is a command.">
         <Switch label="Wake word" checked={p.wakeWord} onChange={(wakeWord) => voice.setPrefs({ wakeWord })} />
       </Line>
-      <Line label="Speech recognition" hint="Whisper, on this device. RAM while on: Tiny ~200 MB, Base ~300 MB, Small ~600 MB. Base is the best balance of speed and accuracy.">
+      <Line label="Speech recognition" hint={'Whisper, on this device. RAM: Tiny ~200 MB, Base ~300 MB, Small ~600 MB. Base is the default.' + ('gpu' in navigator ? ' Whisper Small is the most accurate and runs fast on the graphics card with WebGPU.' : '')}>
         <Segmented<VoicePrefs['sttModel']>
           label="Speech model"
           value={p.sttModel}
@@ -120,10 +164,14 @@ export function VoiceSettings() {
           </label>
         ))}
       </Line>
-      <Line label="Models" hint={ready ? `Downloaded and cached${v.device ? ` · running on ${v.device === 'webgpu' ? 'GPU (WebGPU)' : 'CPU (WASM)'}` : ''}.` : 'Downloaded once from Hugging Face, then cached by the browser.'}>
+      <Line label="Keep voice loaded" hint="Keep speech models in memory between wakes for instant listening. Turning this off frees their memory when voice is off.">
+        <Switch label="Keep voice loaded" checked={p.keepLoaded} onChange={(keepLoaded) => voice.setPrefs({ keepLoaded })} />
+      </Line>
+      <Line label="Model storage" hint={v.persisted === true ? 'Models are kept on this device' : 'The browser may clear the models when space is low'}>{null}</Line>
+      <Line label="Models" hint={ready ? `Downloaded and cached${v.device ? ` · running on ${v.device === 'webgpu' ? 'GPU (WebGPU)' : 'CPU (WASM)'}` : ''}.` : loadingLabel || 'Downloads from Hugging Face are saved by the browser for reuse.'}>
         <button className="btn ghost sm" disabled={downloading || ready} onClick={() => voice.preload()}>
           <Download size={14} strokeWidth={1.5} />
-          {ready ? 'Ready' : downloading ? `Voice ${v.progress.voice}% · Ears ${v.progress.ears}%` : 'Download now'}
+          {ready ? 'Ready' : downloading ? 'Loading models' : 'Download now'}
         </button>
       </Line>
     </section>

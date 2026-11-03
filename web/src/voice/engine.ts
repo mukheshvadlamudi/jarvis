@@ -1,10 +1,17 @@
 import { useSyncExternalStore } from 'react';
 import { isNoise } from './intents.ts';
 import { sentences } from './speech.ts';
+import { openMicrophone, resolveMic } from './microphone.ts';
+import { modelLoadLabel } from './loading.ts';
+import type { ModelLoad } from './loading.ts';
 
 /** Per-device voice preferences (voice runs in this browser/app, so they live in localStorage). */
 export interface VoicePrefs {
   enabled: boolean;
+  micId: string;
+  micSensitivity: 'normal' | 'high';
+  noiseSuppression: boolean;
+  keepLoaded: boolean;
   /** kokoro: natural neural voice on this device (~600 MB RAM while on). system: the OS voice (no extra RAM). */
   engine: 'kokoro' | 'system';
   voice: string;
@@ -19,6 +26,10 @@ export interface VoicePrefs {
 
 export const DEFAULT_PREFS: VoicePrefs = {
   enabled: false,
+  micId: '',
+  micSensitivity: 'normal',
+  noiseSuppression: true,
+  keepLoaded: typeof navigator !== 'undefined' && 'gpu' in navigator,
   engine: 'kokoro',
   voice: 'af_heart',
   voiceChosen: false,
@@ -60,6 +71,10 @@ export type VoiceStatus = 'off' | 'loading' | 'idle' | 'listening' | 'hearing' |
 
 export interface VoiceState {
   status: VoiceStatus;
+  micLabel: string;
+  micFallback: string;
+  persisted: boolean | null;
+  loads: Partial<Record<'voice' | 'ears', ModelLoad>>;
   prefs: VoicePrefs;
   progress: { voice: number; ears: number };
   device: string | null;
@@ -85,21 +100,24 @@ type Listener = () => void;
  * Nothing leaves the device and nothing costs credits.
  */
 class VoiceEngine {
-  state: VoiceState = { status: 'off', prefs: loadPrefs(), progress: { voice: 0, ears: 0 }, device: null, natural: 'unloaded', naturalError: null, adapter: '', fallback: '', activeEngine: null, outcome: '', ignored: false, heard: '', said: '', awaiting: false, level: 0, error: null, needsGesture: false };
+  state: VoiceState = { status: 'off', micLabel: '', micFallback: '', persisted: null, loads: {}, prefs: loadPrefs(), progress: { voice: 0, ears: 0 }, device: null, natural: 'unloaded', naturalError: null, adapter: '', fallback: '', activeEngine: null, outcome: '', ignored: false, heard: '', said: '', awaiting: false, level: 0, error: null, needsGesture: false };
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<Listener>();
   private tts: Worker | null = null;
   private stt: Worker | null = null;
   private ctx: AudioContext | null = null;
   private vad: { start: () => Promise<void>; pause: () => Promise<void>; destroy: () => Promise<void> } | null = null;
+  private micGeneration = 0;
+  private micQueue = Promise.resolve();
   private nextId = 1;
   private playing: AudioBufferSourceNode[] = [];
   private playhead = 0;
   private speakId = 0;
+  /** The newest line asked for while the natural voice was still loading. */
+  private held: { text: string; at: number; resolve: () => void } | null = null;
   private speakDone: Map<number, () => void> = new Map();
   private sttWait: Map<number, (t: string) => void> = new Map();
   private ready = { voice: false, ears: false };
-  private progressByFile: Record<'voice' | 'ears', Record<string, number>> = { voice: {}, ears: {} };
   onUseHeard: ((text: string) => Promise<void>) | null = null;
   onUtterance: ((text: string) => void) | null = null;
 
@@ -130,21 +148,21 @@ class VoiceEngine {
     this.tts?.terminate();
     this.tts = null;
     this.ready.voice = false;
-    this.progressByFile.voice = {};
-    this.set({ natural: 'loading', naturalError: null, fallback: '', adapter: '', device: null, progress: { ...this.state.progress, voice: 0 } });
+    this.set({ loads: { ...this.state.loads, voice: { status: 'loading', loaded: 0, total: 0 } }, natural: 'loading', naturalError: null, fallback: '', adapter: '', device: null, progress: { ...this.state.progress, voice: 0 } });
     this.workers();
     this.tts!.postMessage({ type: 'load', quality: this.state.prefs.voiceQuality });
   }
 
   setPrefs(patch: Partial<VoicePrefs>) {
+    const micChanged = (['micId', 'micSensitivity', 'noiseSuppression'] as const).some((key) => patch[key] !== undefined && patch[key] !== this.state.prefs[key]);
+    const sttChanged = patch.sttModel !== undefined && patch.sttModel !== this.state.prefs.sttModel;
     if (patch.engine && patch.engine !== this.state.prefs.engine) {
       this.stopSpeaking();
       if (patch.engine === 'system') {
         this.tts?.terminate();
         this.tts = null;
         this.ready.voice = false;
-        this.progressByFile.voice = {};
-        this.set({ progress: { ...this.state.progress, voice: 0 }, natural: 'unloaded', device: null, naturalError: null, fallback: '', adapter: '' });
+        this.set({ loads: { ...this.state.loads, voice: undefined }, progress: { ...this.state.progress, voice: 0 }, natural: 'unloaded', device: null, naturalError: null, fallback: '', adapter: '' });
       }
     }
     if (patch.voice !== undefined) patch = { ...patch, voiceChosen: true };
@@ -156,37 +174,50 @@ class VoiceEngine {
       // storage blocked
     }
     this.set({ prefs });
+    if (micChanged && prefs.enabled) void this.restartMic();
+    if (sttChanged && this.stt) {
+      this.ready.ears = false;
+      this.set({ loads: { ...this.state.loads, ears: { status: 'loading', loaded: 0, total: 0 } }, progress: { ...this.state.progress, ears: 0 } });
+      this.stt.postMessage({ type: 'load', model: prefs.sttModel });
+    }
+    if (patch.keepLoaded === false && !prefs.enabled) this.release();
     if (qualityChanged || (patch.engine === 'kokoro' && this.state.prefs.enabled)) this.retryVoice();
     if ((patch.voice || patch.speed) && this.ready.voice) this.tts?.postMessage({ type: 'prewarm', phrases: PHRASES.slice(0, 4), voice: prefs.voice, speed: prefs.speed });
   }
 
   private onWorker = (e: MessageEvent) => {
-    const m = e.data as { type: string; what?: 'voice' | 'ears'; file?: string; progress?: number; id?: number; samples?: Float32Array; rate?: number; last?: boolean; text?: string; message?: string; device?: string; adapter?: string; fallback?: string };
-    if (m.type === 'diagnostic') {
+    const m = e.data as { type: string; what?: 'voice' | 'ears'; load?: ModelLoad; id?: number; samples?: Float32Array; rate?: number; last?: boolean; text?: string; message?: string; device?: string; adapter?: string; fallback?: string };
+    if (m.type === 'model-load' && m.what && m.load) {
+      this.set({ loads: { ...this.state.loads, [m.what]: m.load } });
+    } else if (m.type === 'diagnostic') {
       this.set({ adapter: m.adapter ?? this.state.adapter, fallback: m.fallback ?? this.state.fallback });
-    } else if (m.type === 'progress' && m.what) {
-      this.progressByFile[m.what][m.file ?? '?'] = m.progress ?? 0;
-      const vals = Object.values(this.progressByFile[m.what]);
-      this.set({ progress: { ...this.state.progress, [m.what]: Math.round(vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length)) } });
     } else if (m.type === 'ready' && m.what) {
       this.ready[m.what] = true;
+      this.set({ loads: { ...this.state.loads, [m.what]: { status: 'ready', loaded: 0, total: 0 } } });
       if (m.what === 'voice') this.tts?.postMessage({ type: 'prewarm', phrases: PHRASES, voice: this.state.prefs.voice, speed: this.state.prefs.speed });
       this.set({ progress: { ...this.state.progress, [m.what]: 100 }, ...(m.what === 'voice' ? { device: m.device ?? null, natural: 'ready' as const, naturalError: null } : {}) });
+      // Say what arrived while the voice was loading, if it is still recent.
+      const held = this.held;
+      this.held = null;
+      if (m.what === 'voice' && held && Date.now() - held.at < 60_000) void this.speak(held.text).then(held.resolve);
+      else held?.resolve();
     } else if (m.type === 'audio' && m.samples && m.id === this.speakId) {
       this.enqueue(m.samples, m.rate ?? 24000, !!m.last, m.id);
     } else if (m.type === 'text' && m.id !== undefined) {
       this.sttWait.get(m.id)?.(m.text ?? '');
       this.sttWait.delete(m.id);
     } else if (m.type === 'error') {
+      if (m.what) this.set({ loads: { ...this.state.loads, [m.what]: { status: 'failed', loaded: 0, total: 0 } } });
       if (m.what === 'voice') {
         this.ready.voice = false;
         this.set({ natural: 'failed', naturalError: m.message ?? 'Unknown loading error' });
+        this.held?.resolve();
+        this.held = null;
         if (m.id === this.speakId) {
-          const text = this.state.said;
           const done = this.speakDone.get(this.speakId);
           this.speakDone.delete(this.speakId);
           this.stopSpeaking();
-          void this.speakSystem(text).then(() => done?.());
+          done?.();
         }
         return;
       }
@@ -207,6 +238,7 @@ class VoiceEngine {
     if (!this.stt) {
       this.stt = new Worker(new URL('./stt.worker.ts', import.meta.url), { type: 'module' });
       this.stt.onmessage = this.onWorker;
+      this.stt.onerror = (e) => this.onWorker({ data: { type: 'error', what: 'ears', message: e.message } } as MessageEvent);
     }
   }
 
@@ -219,23 +251,25 @@ class VoiceEngine {
   preload() {
     this.workers();
     if (this.state.prefs.engine === 'kokoro' && this.state.natural === 'unloaded') {
-      this.set({ natural: 'loading' });
+      this.set({ natural: 'loading', loads: { ...this.state.loads, voice: { status: 'loading', loaded: 0, total: 0 } } });
       this.tts!.postMessage({ type: 'load', quality: this.state.prefs.voiceQuality });
     }
-    this.stt!.postMessage({ type: 'load', model: this.state.prefs.sttModel });
+    if (!this.ready.ears && this.state.loads.ears?.status !== 'loading') {
+      this.set({ loads: { ...this.state.loads, ears: { status: 'loading', loaded: 0, total: 0 } } });
+      this.stt!.postMessage({ type: 'load', model: this.state.prefs.sttModel });
+    }
   }
 
-  /** Free the models (Kokoro ~600 MB, Whisper ~200–600 MB) whenever voice is off. */
+  /** Free models when memory retention is disabled. */
   private release() {
     this.tts?.terminate();
     this.stt?.terminate();
     this.tts = null;
     this.stt = null;
     this.ready = { voice: false, ears: false };
-    this.progressByFile = { voice: {}, ears: {} };
     for (const r of this.sttWait.values()) r('');
     this.sttWait.clear();
-    this.set({ progress: { voice: 0, ears: 0 }, device: null, natural: 'unloaded', naturalError: null, activeEngine: null, adapter: '', fallback: '' });
+    this.set({ loads: {}, progress: { voice: 0, ears: 0 }, device: null, natural: 'unloaded', naturalError: null, activeEngine: null, adapter: '', fallback: '' });
   }
 
   /** Turn hands-free voice on. Browsers need one user gesture for audio; the desktop app doesn't. */
@@ -243,6 +277,8 @@ class VoiceEngine {
     if (this.state.status !== 'off' && this.state.status !== 'error') return;
     this.setPrefs({ enabled: true });
     this.set({ status: 'loading', error: null });
+    void this.requestPersistence();
+    navigator.mediaDevices?.addEventListener?.('devicechange', this.devicesChanged);
     try {
       this.workers();
       const ctx = this.audio();
@@ -260,50 +296,92 @@ class VoiceEngine {
         });
         this.set({ needsGesture: false });
       }
+      if (!this.state.prefs.enabled) return;
       this.preload();
-      const { MicVAD } = await import('@ricky0123/vad-web');
-      const vad = await MicVAD.new({
-        model: 'v5',
-        baseAssetPath: '/voice-runtime/vad/',
-        onnxWASMBasePath: '/voice-runtime/vad/',
-        positiveSpeechThreshold: 0.6,
-        negativeSpeechThreshold: 0.4,
-        redemptionMs: 700,
-        minSpeechMs: 300,
-        preSpeechPadMs: 250,
-        getStream: () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } }),
-        onFrameProcessed: (p: { isSpeech: number }) => {
-          if (Math.abs(p.isSpeech - this.state.level) > 0.05) this.set({ level: p.isSpeech });
-        },
-        onSpeechStart: () => {
-          // Barge-in: talking over Jarvis stops it.
-          if (this.state.status === 'speaking') this.stopSpeaking();
-          this.feedback('');
-          this.set({ status: 'hearing' });
-        },
-        onVADMisfire: () => {
-          this.set({ status: 'listening', heard: '' });
-          this.feedback('Too short, try again', false, true);
-        },
-        onSpeechEnd: (audio: Float32Array) => void this.handleSpeech(audio),
-      } as never);
-      this.vad = vad as unknown as typeof this.vad;
-      await this.vad!.start();
-      this.set({ status: 'listening' });
+      await this.restartMic();
     } catch (err) {
       const msg = (err as Error).name === 'NotAllowedError' ? 'Microphone access was blocked. Allow it for Jarvis in the browser or system settings.' : (err as Error).message;
       this.set({ status: 'error', error: msg });
     }
   }
 
+  setPersistenceStatus(persisted: boolean) { this.set({ persisted }); }
+
+  async requestPersistence() {
+    try { this.set({ persisted: await navigator.storage.persist() }); }
+    catch { this.set({ persisted: false }); }
+  }
+
+  private devicesChanged = () => {
+    void navigator.mediaDevices.enumerateDevices().then((devices) => {
+      const { missing } = resolveMic(this.state.prefs.micId, devices);
+      if (missing !== !!this.state.micFallback) void this.restartMic();
+    }).catch(() => undefined);
+  };
+
+  private restartMic(): Promise<void> {
+    const generation = ++this.micGeneration;
+    this.micQueue = this.micQueue.catch(() => undefined).then(async () => {
+      await this.vad?.destroy().catch(() => undefined);
+      this.vad = null;
+      if (generation !== this.micGeneration || !this.state.prefs.enabled) return;
+      const prefs = this.state.prefs;
+      this.set({ level: 0, micLabel: '' });
+      try {
+        const { MicVAD } = await import('@ricky0123/vad-web');
+        const vad = await MicVAD.new({
+          model: 'v5',
+          baseAssetPath: '/voice-runtime/vad/',
+          onnxWASMBasePath: '/voice-runtime/vad/',
+          positiveSpeechThreshold: prefs.micSensitivity === 'high' ? 0.45 : 0.6,
+          negativeSpeechThreshold: prefs.micSensitivity === 'high' ? 0.3 : 0.45,
+          redemptionMs: 700,
+          minSpeechMs: prefs.micSensitivity === 'high' ? 200 : 300,
+          preSpeechPadMs: 250,
+          startOnLoad: false,
+          getStream: async () => {
+            const { stream, missing } = await openMicrophone(prefs.micId, prefs.noiseSuppression);
+            if (generation !== this.micGeneration) { stream.getTracks().forEach((t) => t.stop()); throw new Error('Microphone changed'); }
+            this.set({ micLabel: stream.getAudioTracks()[0]?.label ?? '', micFallback: missing ? 'Selected microphone is unavailable · using system default' : '' });
+            return stream;
+          },
+          onFrameProcessed: (p: { isSpeech: number }) => {
+            if (Math.abs(p.isSpeech - this.state.level) > 0.05) this.set({ level: p.isSpeech });
+          },
+          onSpeechStart: () => {
+            // Barge-in: talking over Jarvis stops it.
+            if (this.state.status === 'speaking') this.stopSpeaking();
+            this.feedback('');
+            this.set({ status: 'hearing' });
+          },
+          onVADMisfire: () => {
+            this.set({ status: 'listening', heard: '' });
+            this.feedback('Too short, try again', false, true);
+          },
+          onSpeechEnd: (audio: Float32Array) => void this.handleSpeech(audio),
+        });
+        if (generation !== this.micGeneration) { await vad.destroy(); return; }
+        this.vad = vad;
+        await this.vad!.start();
+        if (generation !== this.micGeneration) { await vad.destroy(); return; }
+        this.set({ status: 'listening' });
+      } catch (err) {
+        if (generation === this.micGeneration) this.set({ status: 'error', error: (err as Error).name === 'NotAllowedError' ? 'Microphone access was blocked. Allow it for Jarvis in the browser or system settings.' : (err as Error).message });
+      }
+    });
+    return this.micQueue;
+  }
+
   async stop(): Promise<void> {
     this.setPrefs({ enabled: false });
+    ++this.micGeneration;
+    navigator.mediaDevices?.removeEventListener?.('devicechange', this.devicesChanged);
     this.stopSpeaking();
     await this.vad?.destroy().catch(() => undefined);
     this.vad = null;
-    this.release();
+    if (!this.state.prefs.keepLoaded) this.release();
     this.feedback('');
-    this.set({ status: 'off', level: 0, awaiting: false });
+    this.set({ status: 'off', level: 0, awaiting: false, micLabel: '', micFallback: '' });
   }
 
   setAwaiting(awaiting: boolean) {
@@ -315,11 +393,12 @@ class VoiceEngine {
     this.feedback('Transcribing…');
     this.set({ status: 'thinking', heard: '…' });
     const id = this.nextId++;
+    const generation = this.micGeneration;
     const text = await new Promise<string>((resolve) => {
       this.sttWait.set(id, resolve);
       this.stt!.postMessage({ type: 'transcribe', id, audio, language: this.state.prefs.language, model: this.state.prefs.sttModel }, [audio.buffer]);
     });
-    if (this.state.status === 'off') return;
+    if (this.state.status === 'off' || generation !== this.micGeneration) return;
     this.set({ heard: text, status: this.state.status === 'thinking' ? 'listening' : this.state.status });
     if (isNoise(text)) {
       this.feedback('Not sure what you meant', false, true);
@@ -354,11 +433,18 @@ class VoiceEngine {
   speak(text: string): Promise<void> {
     const clean = text.trim();
     if (!clean) return Promise.resolve();
-    // Never silent: the OS voice covers the first-ever download; after that Kokoro is used.
+    // System speech is used only when explicitly selected.
     if (this.state.prefs.engine === 'system') return this.speakSystem(clean);
     if (!this.ready.voice) {
       if (this.state.natural === 'unloaded') this.preload();
-      return this.speakSystem(clean);
+      if (this.state.natural === 'failed') {
+        this.feedback('Natural voice failed to load · retry in Settings → Voice');
+        return Promise.resolve();
+      }
+      // Hold the newest line and say it the moment the natural voice is ready (no robotic stand-in).
+      this.held?.resolve();
+      this.feedback('Natural voice is loading · Jarvis will say this when it is ready');
+      return new Promise<void>((resolve) => (this.held = { text: clean, at: Date.now(), resolve }));
     }
     this.workers();
     this.stopSpeaking();
@@ -443,12 +529,12 @@ export function useVoice(): VoiceState {
 export function voiceEngineStatus(v: VoiceState): string {
   const device = v.device === 'webgpu' ? 'Graphics card (WebGPU)' : 'CPU (WASM)';
   const system = v.status === 'speaking' ? v.activeEngine === 'system' : v.prefs.engine === 'system' || v.natural !== 'ready';
-  let label = system ? 'System voice' : 'Natural voice';
+  let label = system && v.prefs.engine === 'system' ? 'System voice' : 'Natural voice';
   if (v.prefs.engine === 'kokoro') {
     if (v.natural === 'failed') label += ' \u00b7 natural voice failed to load: ' + v.naturalError;
-    else if (v.natural === 'loading') label += ' \u00b7 natural voice downloading ' + v.progress.voice + '%';
+    else if (v.natural === 'loading') label += ' \u00b7 ' + (modelLoadLabel('voice', v.loads.voice) || 'Loading voice');
     else if (v.natural === 'ready') label += system ? ' \u00b7 natural voice ready on ' + device : ' \u00b7 ' + device;
-    else label += ' \u00b7 natural voice not loaded';
+    else label += ' \u00b7 loads when voice turns on';
   }
   return label;
 }

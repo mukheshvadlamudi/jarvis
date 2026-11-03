@@ -1,3 +1,4 @@
+import { modelLoadLabel } from '../voice/loading.ts';
 import { Mic, MicOff, Square, Volume2 } from 'lucide-react';
 import { voice, useVoice, voiceEngineStatus } from '../voice/engine.ts';
 import type { VoiceStatus } from '../voice/engine.ts';
@@ -46,14 +47,14 @@ function Ring({ status, level }: { status: VoiceStatus; level: number }) {
 export function VoiceDock() {
   const v = useVoice();
   if (v.status === 'off') return null;
-  const loading = v.status === 'loading' || (v.progress.voice < 100 && v.progress.voice > 0) || (v.progress.ears < 100 && v.progress.ears > 0);
+  const loading = [modelLoadLabel('voice', v.loads.voice), modelLoadLabel('speech recognition', v.loads.ears)].filter(Boolean).join(' · ');
   const hint =
     v.needsGesture
       ? 'Click anywhere to let Jarvis use audio'
       : v.status === 'error'
         ? v.error
         : loading
-          ? `Downloading voice models (first time only) · voice ${v.progress.voice}% · ears ${v.progress.ears}%`
+          ? loading
           : v.status === 'listening'
             ? v.awaiting
               ? 'Go ahead — no need to say “Jarvis”'
@@ -66,15 +67,17 @@ export function VoiceDock() {
                 ? `“${v.heard}”`
                 : '';
   return (
-    <div className={`voice-dock ${v.status}`} role="status" aria-live="polite" style={{ alignItems: 'flex-start', flexWrap: 'wrap', borderRadius: 12 }}>
+    <div className={`voice-dock ${v.status}`} title={v.micLabel ? "Using microphone: " + v.micLabel : "Microphone starting"} role="status" aria-live="polite" style={{ alignItems: 'flex-start', flexWrap: 'wrap', borderRadius: 12 }}>
       <Ring status={v.status} level={v.level} />
       <div className="voice-text" style={{ flex: '1 1 160px', minWidth: 0 }}>
         <span className="voice-state">
           {LABEL[v.status]}
         </span>
         {v.needsGesture || v.status === 'error' ? <span className="voice-hint" style={{ whiteSpace: 'normal' }}>{hint}</span> : null}
-        {v.outcome || v.heard ? <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', maxHeight: 120, overflowY: 'auto' }}>{v.ignored ? v.outcome : [v.heard ? 'Heard: ' + v.heard : '', v.outcome].filter(Boolean).join(' \u00b7 ')}</span> : hint ? <span className="voice-hint">{hint}</span> : null}
+        {v.outcome || v.heard ? <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', maxHeight: 120, overflowY: 'auto' }}>{v.ignored ? v.outcome : [v.heard ? 'Heard: ' + v.heard : '', v.outcome].filter(Boolean).join(' \u00b7 ')}</span> : hint ? <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{hint}</span> : null}
         <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', WebkitLineClamp: 'unset' }}>{voiceEngineStatus(v)}</span>
+        {v.micFallback ? <span className="voice-hint" style={{ whiteSpace: 'normal' }}>{v.micFallback}</span> : null}
+        {loading && (v.outcome || v.heard) ? <span className="voice-hint" style={{ whiteSpace: 'normal' }}>{loading}</span> : null}
         {v.fallback || v.adapter ? <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', WebkitLineClamp: 'unset' }}>{[v.adapter, v.fallback].filter(Boolean).join(' \u00b7 ')}</span> : null}
         {v.ignored ? <button className="btn ghost sm" style={{ alignSelf: 'flex-start', minHeight: 44 }} onClick={() => void voice.useHeard()}>Use it</button> : null}
       </div>
