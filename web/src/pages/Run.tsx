@@ -12,6 +12,7 @@ import { navigate, setQuery, useLocation } from '../lib/router.ts';
 import { toast, toastError } from '../lib/toast.ts';
 import type { Approval, ContextReport, Project, Run, RunEvent, Task } from '../lib/types.ts';
 import type { PageProps } from '../routes.ts';
+import { Markdown } from '../lib/markdown.tsx';
 
 interface TaskDetail {
   task: Task;
@@ -326,7 +327,9 @@ export default function RunPage({ params }: PageProps) {
               <ListChecks size={16} strokeWidth={1.5} />
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 500, marginBottom: 2 }}>Result</div>
-                <div style={{ overflowWrap: 'anywhere' }}>{task.result_summary}</div>
+                <div style={{ overflowWrap: 'anywhere', minWidth: 0 }}>
+                  <Markdown source={task.result_summary} />
+                </div>
               </div>
             </div>
           ) : null}
@@ -400,7 +403,7 @@ export default function RunPage({ params }: PageProps) {
               return (
                 <div key={i} className={`msg ${role === 'user' ? 'user' : role === 'reasoning' ? 'reasoning' : ''}`}>
                   {role === 'user' ? <span className="msg-label">You</span> : null}
-                  {String(it.ev.payload.text ?? '')}
+                  {role === 'user' || role === 'reasoning' ? String(it.ev.payload.text ?? '') : <Markdown source={String(it.ev.payload.text ?? '')} />}
                 </div>
               );
             })}

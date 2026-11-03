@@ -1,5 +1,5 @@
 import { Mic, MicOff, Square, Volume2 } from 'lucide-react';
-import { voice, useVoice } from '../voice/engine.ts';
+import { voice, useVoice, voiceEngineStatus } from '../voice/engine.ts';
 import type { VoiceStatus } from '../voice/engine.ts';
 
 const LABEL: Record<VoiceStatus, string> = {
@@ -8,7 +8,7 @@ const LABEL: Record<VoiceStatus, string> = {
   idle: 'Ready',
   listening: 'Listening',
   hearing: 'Hearing you',
-  thinking: 'Thinking',
+  thinking: 'Transcribing',
   speaking: 'Speaking',
   error: 'Voice error',
 };
@@ -37,7 +37,7 @@ function Ring({ status, level }: { status: VoiceStatus; level: number }) {
     <svg className={`voice-ring ${status}`} viewBox="0 0 40 40" aria-hidden>
       <circle cx="20" cy="20" r="17" fill="none" stroke="var(--border-strong)" strokeWidth="1" strokeDasharray="2 4" className="voice-ring-outer" />
       <circle cx="20" cy="20" r="11" fill="none" stroke="var(--accent)" strokeWidth="2" opacity={active ? 1 : 0.55} style={{ transform: `scale(${scale})`, transformOrigin: '20px 20px', transition: 'transform 90ms linear' }} />
-      <circle cx="20" cy="20" r="5" fill="var(--accent)" opacity={status === 'listening' || status === 'idle' ? 0.6 : 1} className={status === 'speaking' || status === 'thinking' ? 'voice-core-pulse' : undefined} />
+      <circle cx="20" cy="20" r="5" fill="var(--accent)" opacity={status === 'listening' || status === 'idle' ? 0.6 : 1} className={active ? 'voice-core-pulse' : undefined} />
     </svg>
   );
 }
@@ -66,25 +66,28 @@ export function VoiceDock() {
                 ? `“${v.heard}”`
                 : '';
   return (
-    <div className={`voice-dock ${v.status}`} role="status" aria-live="polite">
+    <div className={`voice-dock ${v.status}`} role="status" aria-live="polite" style={{ alignItems: 'flex-start', flexWrap: 'wrap', borderRadius: 12 }}>
       <Ring status={v.status} level={v.level} />
-      <div className="voice-text">
+      <div className="voice-text" style={{ flex: '1 1 160px', minWidth: 0 }}>
         <span className="voice-state">
           {LABEL[v.status]}
-          {v.device ? <span className="faint"> · {v.device === 'webgpu' ? 'GPU' : 'CPU'}</span> : null}
         </span>
-        {hint ? <span className="voice-hint">{hint}</span> : null}
+        {v.needsGesture || v.status === 'error' ? <span className="voice-hint" style={{ whiteSpace: 'normal' }}>{hint}</span> : null}
+        {v.outcome || v.heard ? <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', maxHeight: 120, overflowY: 'auto' }}>{v.ignored ? v.outcome : [v.heard ? 'Heard: ' + v.heard : '', v.outcome].filter(Boolean).join(' \u00b7 ')}</span> : hint ? <span className="voice-hint">{hint}</span> : null}
+        <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', WebkitLineClamp: 'unset' }}>{voiceEngineStatus(v)}</span>
+        {v.fallback || v.adapter ? <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', WebkitLineClamp: 'unset' }}>{[v.adapter, v.fallback].filter(Boolean).join(' \u00b7 ')}</span> : null}
+        {v.ignored ? <button className="btn ghost sm" style={{ alignSelf: 'flex-start', minHeight: 44 }} onClick={() => void voice.useHeard()}>Use it</button> : null}
       </div>
       {v.status === 'speaking' ? (
-        <button className="btn ghost icon sm" aria-label="Stop speaking" title="Stop speaking (or just start talking)" onClick={() => voice.stopSpeaking()}>
+        <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label="Stop speaking" title="Stop speaking (or just start talking)" onClick={() => voice.stopSpeaking()}>
           <Square size={14} strokeWidth={1.5} />
         </button>
       ) : (
-        <button className="btn ghost icon sm" aria-label="Test voice" title="Say something" onClick={() => void voice.speak('Systems online. Say Jarvis, then what you need.')}>
+        <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label="Test voice" title="Say something" onClick={() => void voice.speak('Systems online. Say Jarvis, then what you need.')}>
           <Volume2 size={14} strokeWidth={1.5} />
         </button>
       )}
-      <button className="btn ghost icon sm" aria-label="Turn voice off" title="Turn voice off" onClick={() => void voice.stop()}>
+      <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label="Turn voice off" title="Turn voice off" onClick={() => void voice.stop()}>
         <MicOff size={14} strokeWidth={1.5} />
       </button>
     </div>

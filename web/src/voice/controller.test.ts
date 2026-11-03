@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   api: vi.fn(), post: vi.fn(), navigate: vi.fn(),
   voice: {
     state: { status: 'listening', awaiting: false, said: '', prefs: { enabled: true, wakeWord: true, speak: { finished: true, failed: true, approvals: true, brief: true, notify: true, confirmations: true } } },
+    onUseHeard: null as ((text: string) => Promise<void>) | null,
+    feedback: vi.fn(),
     onUtterance: null as ((text: string) => Promise<void>) | null,
     speak: vi.fn(async (_text: string) => {}), start: vi.fn(), stop: vi.fn(), stopSpeaking: vi.fn(), setPrefs: vi.fn(), setAwaiting: vi.fn(),
   },
@@ -42,6 +44,21 @@ describe('Ask voice controller', () => {
     await mocks.voice.onUtterance?.('Jarvis, ask how are backups stored?');
     expect(mocks.post).toHaveBeenCalledExactlyOnceWith('/api/conversations', { text: 'how are backups stored?' });
     expect(mocks.navigate).toHaveBeenCalledWith('/c/chat');
+  });
+
+  it('explains missing wake words and recovers as a conversation', async () => {
+    await mocks.voice.onUtterance?.('research backup tools');
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(mocks.voice.feedback).toHaveBeenLastCalledWith('Heard \u201cresearch backup tools\u201d \u00b7 start with \u201cJarvis\u201d', true, true);
+    await mocks.voice.onUseHeard?.('research backup tools');
+    expect(mocks.post).toHaveBeenCalledExactlyOnceWith('/api/conversations', { text: 'research backup tools' });
+    expect(mocks.navigate).toHaveBeenCalledWith('/c/chat');
+  });
+
+  it.each(['', 'you', 'thank you.', '[BLANK_AUDIO]', '(silence)', 'Jarvis thank you'])('rejects noise: %s', async (text) => {
+    await mocks.voice.onUtterance?.(text);
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(mocks.voice.feedback).toHaveBeenLastCalledWith('Not sure what you meant', false, true);
   });
 
   it('skips fast activity and reads the run answer once, rather than a task summary', async () => {

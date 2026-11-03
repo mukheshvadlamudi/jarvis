@@ -11,6 +11,7 @@ import { relTime, shortAge, TYPE_LABEL } from '../lib/format.ts';
 import { useApi, useNow } from '../lib/hooks.ts';
 import { useLive } from '../lib/live.ts';
 import type { Approval, Task } from '../lib/types.ts';
+import { plainText } from '../lib/markdown.tsx';
 
 function statusLine(running: number, queued: number, needsYou: number): string {
   const parts = [running ? `${running} agent${running === 1 ? '' : 's'} running` : 'No agents running'];
@@ -54,7 +55,7 @@ export default function Home() {
       <SetupBanner />
       <Systems />
 
-      <CommandBar />
+      <CommandBar asConversation />
 
       <div className="home-grid" style={{ marginTop: 24 }}>
         <div style={{ minWidth: 0 }}>
@@ -84,7 +85,7 @@ export default function Home() {
                   <StatusLabel status={t.status} />
                   <div className="row-stack">
                     <span className="title">{t.title}</span>
-                    <span className="sub">{t.result_summary ?? 'Waiting on you'}</span>
+                    <span className="sub">{t.result_summary ? plainText(t.result_summary) : 'Waiting on you'}</span>
                   </div>
                   <span className="time">{shortAge(t.updated_at, now)}</span>
                 </Link>
@@ -170,7 +171,7 @@ export default function Home() {
                       <StatusLabel status={t.status} />
                       <div className="row-stack">
                         <span className="title">{t.title}</span>
-                        <span className="sub">{t.result_summary}</span>
+                        <span className="sub">{plainText(t.result_summary ?? '')}</span>
                       </div>
                       <span className="time">{shortAge(t.updated_at, now)}</span>
                     </Link>

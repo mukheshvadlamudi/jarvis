@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { isNoise } from './intents.ts';
 import { sentences } from './speech.ts';
 
 /** Per-device voice preferences (voice runs in this browser/app, so they live in localStorage). */
@@ -7,6 +8,8 @@ export interface VoicePrefs {
   /** kokoro: natural neural voice on this device (~600 MB RAM while on). system: the OS voice (no extra RAM). */
   engine: 'kokoro' | 'system';
   voice: string;
+  voiceChosen: boolean;
+  voiceQuality: 'best' | 'light';
   speed: number;
   wakeWord: boolean;
   language: string;
@@ -17,7 +20,9 @@ export interface VoicePrefs {
 export const DEFAULT_PREFS: VoicePrefs = {
   enabled: false,
   engine: 'kokoro',
-  voice: 'bm_george',
+  voice: 'af_heart',
+  voiceChosen: false,
+  voiceQuality: 'best',
   speed: 1,
   wakeWord: true,
   language: 'en',
@@ -26,16 +31,16 @@ export const DEFAULT_PREFS: VoicePrefs = {
 };
 
 export const VOICES: Array<{ id: string; label: string }> = [
-  { id: 'bm_george', label: 'George — British, calm (default)' },
-  { id: 'bm_lewis', label: 'Lewis — British, deeper' },
-  { id: 'bm_daniel', label: 'Daniel — British, crisp' },
-  { id: 'bm_fable', label: 'Fable — British, warm' },
-  { id: 'bf_emma', label: 'Emma — British' },
-  { id: 'bf_isabella', label: 'Isabella — British' },
-  { id: 'am_michael', label: 'Michael — American' },
-  { id: 'am_adam', label: 'Adam — American' },
-  { id: 'af_heart', label: 'Heart — American, expressive' },
-  { id: 'af_bella', label: 'Bella — American' },
+  { id: 'af_heart', label: 'Heart \u00b7 American, most natural (recommended) \u00b7 A' },
+  { id: 'af_bella', label: 'Bella \u00b7 American \u00b7 A-' },
+  { id: 'bf_emma', label: 'Emma \u00b7 British \u00b7 B-' },
+  { id: 'am_michael', label: 'Michael \u00b7 American \u00b7 C+' },
+  { id: 'bm_george', label: 'George \u00b7 British \u00b7 C' },
+  { id: 'bm_fable', label: 'Fable \u00b7 British \u00b7 C' },
+  { id: 'bf_isabella', label: 'Isabella \u00b7 British \u00b7 C' },
+  { id: 'bm_lewis', label: 'Lewis \u00b7 British \u00b7 D+' },
+  { id: 'bm_daniel', label: 'Daniel \u00b7 British \u00b7 D' },
+  { id: 'am_adam', label: 'Adam \u00b7 American \u00b7 F+' },
 ];
 
 const KEY = 'jarvis.voice';
@@ -45,7 +50,7 @@ const PHRASES = ['Yes?', 'On it.', 'Approved.', 'Rejected. The agent will skip i
 export function loadPrefs(): VoicePrefs {
   try {
     const p = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<VoicePrefs>;
-    return { ...DEFAULT_PREFS, ...p, speak: { ...DEFAULT_PREFS.speak, ...(p.speak ?? {}) } };
+    return { ...DEFAULT_PREFS, ...p, voice: p.voice === 'bm_george' && !p.voiceChosen ? 'af_heart' : p.voice ?? DEFAULT_PREFS.voice, speak: { ...DEFAULT_PREFS.speak, ...(p.speak ?? {}) } };
   } catch {
     return { ...DEFAULT_PREFS };
   }
@@ -58,6 +63,13 @@ export interface VoiceState {
   prefs: VoicePrefs;
   progress: { voice: number; ears: number };
   device: string | null;
+  natural: 'unloaded' | 'loading' | 'ready' | 'failed';
+  naturalError: string | null;
+  adapter: string;
+  fallback: string;
+  activeEngine: 'kokoro' | 'system' | null;
+  outcome: string;
+  ignored: boolean;
   heard: string;
   said: string;
   awaiting: boolean;
@@ -73,7 +85,8 @@ type Listener = () => void;
  * Nothing leaves the device and nothing costs credits.
  */
 class VoiceEngine {
-  state: VoiceState = { status: 'off', prefs: loadPrefs(), progress: { voice: 0, ears: 0 }, device: null, heard: '', said: '', awaiting: false, level: 0, error: null, needsGesture: false };
+  state: VoiceState = { status: 'off', prefs: loadPrefs(), progress: { voice: 0, ears: 0 }, device: null, natural: 'unloaded', naturalError: null, adapter: '', fallback: '', activeEngine: null, outcome: '', ignored: false, heard: '', said: '', awaiting: false, level: 0, error: null, needsGesture: false };
+  private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<Listener>();
   private tts: Worker | null = null;
   private stt: Worker | null = null;
@@ -87,6 +100,7 @@ class VoiceEngine {
   private sttWait: Map<number, (t: string) => void> = new Map();
   private ready = { voice: false, ears: false };
   private progressByFile: Record<'voice' | 'ears', Record<string, number>> = { voice: {}, ears: {} };
+  onUseHeard: ((text: string) => Promise<void>) | null = null;
   onUtterance: ((text: string) => void) | null = null;
 
   subscribe = (l: Listener) => {
@@ -98,6 +112,30 @@ class VoiceEngine {
     this.listeners.forEach((l) => l());
   }
 
+  feedback(outcome: string, ignored = false, brief = false) {
+    if (this.feedbackTimer) clearTimeout(this.feedbackTimer);
+    this.set({ outcome, ignored });
+    if (brief) this.feedbackTimer = setTimeout(() => this.set({ outcome: '', ignored: false }), 7000);
+  }
+
+  async useHeard() {
+    const text = this.state.heard;
+    if (!this.state.ignored || !text) return;
+    this.feedback('Opening a conversation…');
+    await this.onUseHeard?.(text);
+  }
+
+  retryVoice() {
+    this.stopSpeaking();
+    this.tts?.terminate();
+    this.tts = null;
+    this.ready.voice = false;
+    this.progressByFile.voice = {};
+    this.set({ natural: 'loading', naturalError: null, fallback: '', adapter: '', device: null, progress: { ...this.state.progress, voice: 0 } });
+    this.workers();
+    this.tts!.postMessage({ type: 'load', quality: this.state.prefs.voiceQuality });
+  }
+
   setPrefs(patch: Partial<VoicePrefs>) {
     if (patch.engine && patch.engine !== this.state.prefs.engine) {
       this.stopSpeaking();
@@ -106,9 +144,11 @@ class VoiceEngine {
         this.tts = null;
         this.ready.voice = false;
         this.progressByFile.voice = {};
-        this.set({ progress: { ...this.state.progress, voice: 0 } });
+        this.set({ progress: { ...this.state.progress, voice: 0 }, natural: 'unloaded', device: null, naturalError: null, fallback: '', adapter: '' });
       }
     }
+    if (patch.voice !== undefined) patch = { ...patch, voiceChosen: true };
+    const qualityChanged = patch.voiceQuality !== undefined && patch.voiceQuality !== this.state.prefs.voiceQuality;
     const prefs = { ...this.state.prefs, ...patch, speak: { ...this.state.prefs.speak, ...(patch.speak ?? {}) } };
     try {
       localStorage.setItem(KEY, JSON.stringify(prefs));
@@ -116,25 +156,40 @@ class VoiceEngine {
       // storage blocked
     }
     this.set({ prefs });
+    if (qualityChanged || (patch.engine === 'kokoro' && this.state.prefs.enabled)) this.retryVoice();
     if ((patch.voice || patch.speed) && this.ready.voice) this.tts?.postMessage({ type: 'prewarm', phrases: PHRASES.slice(0, 4), voice: prefs.voice, speed: prefs.speed });
   }
 
   private onWorker = (e: MessageEvent) => {
-    const m = e.data as { type: string; what?: 'voice' | 'ears'; file?: string; progress?: number; id?: number; samples?: Float32Array; rate?: number; last?: boolean; text?: string; message?: string; device?: string };
-    if (m.type === 'progress' && m.what) {
+    const m = e.data as { type: string; what?: 'voice' | 'ears'; file?: string; progress?: number; id?: number; samples?: Float32Array; rate?: number; last?: boolean; text?: string; message?: string; device?: string; adapter?: string; fallback?: string };
+    if (m.type === 'diagnostic') {
+      this.set({ adapter: m.adapter ?? this.state.adapter, fallback: m.fallback ?? this.state.fallback });
+    } else if (m.type === 'progress' && m.what) {
       this.progressByFile[m.what][m.file ?? '?'] = m.progress ?? 0;
       const vals = Object.values(this.progressByFile[m.what]);
       this.set({ progress: { ...this.state.progress, [m.what]: Math.round(vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length)) } });
     } else if (m.type === 'ready' && m.what) {
       this.ready[m.what] = true;
       if (m.what === 'voice') this.tts?.postMessage({ type: 'prewarm', phrases: PHRASES, voice: this.state.prefs.voice, speed: this.state.prefs.speed });
-      this.set({ progress: { ...this.state.progress, [m.what]: 100 }, device: m.device ?? this.state.device });
+      this.set({ progress: { ...this.state.progress, [m.what]: 100 }, ...(m.what === 'voice' ? { device: m.device ?? null, natural: 'ready' as const, naturalError: null } : {}) });
     } else if (m.type === 'audio' && m.samples && m.id === this.speakId) {
       this.enqueue(m.samples, m.rate ?? 24000, !!m.last, m.id);
     } else if (m.type === 'text' && m.id !== undefined) {
       this.sttWait.get(m.id)?.(m.text ?? '');
       this.sttWait.delete(m.id);
     } else if (m.type === 'error') {
+      if (m.what === 'voice') {
+        this.ready.voice = false;
+        this.set({ natural: 'failed', naturalError: m.message ?? 'Unknown loading error' });
+        if (m.id === this.speakId) {
+          const text = this.state.said;
+          const done = this.speakDone.get(this.speakId);
+          this.speakDone.delete(this.speakId);
+          this.stopSpeaking();
+          void this.speakSystem(text).then(() => done?.());
+        }
+        return;
+      }
       if (m.id !== undefined && m.id !== null) {
         this.sttWait.get(m.id)?.('');
         this.speakDone.get(m.id)?.();
@@ -147,6 +202,7 @@ class VoiceEngine {
     if (!this.tts) {
       this.tts = new Worker(new URL('./tts.worker.ts', import.meta.url), { type: 'module' });
       this.tts.onmessage = this.onWorker;
+      this.tts.onerror = (e) => this.onWorker({ data: { type: 'error', what: 'voice', message: e.message, id: this.speakId } } as MessageEvent);
     }
     if (!this.stt) {
       this.stt = new Worker(new URL('./stt.worker.ts', import.meta.url), { type: 'module' });
@@ -162,7 +218,10 @@ class VoiceEngine {
   /** Download/warm the models without starting the mic (Settings → "Download voice models"). */
   preload() {
     this.workers();
-    if (this.state.prefs.engine === 'kokoro') this.tts!.postMessage({ type: 'load' });
+    if (this.state.prefs.engine === 'kokoro' && this.state.natural === 'unloaded') {
+      this.set({ natural: 'loading' });
+      this.tts!.postMessage({ type: 'load', quality: this.state.prefs.voiceQuality });
+    }
     this.stt!.postMessage({ type: 'load', model: this.state.prefs.sttModel });
   }
 
@@ -176,7 +235,7 @@ class VoiceEngine {
     this.progressByFile = { voice: {}, ears: {} };
     for (const r of this.sttWait.values()) r('');
     this.sttWait.clear();
-    this.set({ progress: { voice: 0, ears: 0 }, device: null });
+    this.set({ progress: { voice: 0, ears: 0 }, device: null, natural: 'unloaded', naturalError: null, activeEngine: null, adapter: '', fallback: '' });
   }
 
   /** Turn hands-free voice on. Browsers need one user gesture for audio; the desktop app doesn't. */
@@ -219,9 +278,13 @@ class VoiceEngine {
         onSpeechStart: () => {
           // Barge-in: talking over Jarvis stops it.
           if (this.state.status === 'speaking') this.stopSpeaking();
+          this.feedback('');
           this.set({ status: 'hearing' });
         },
-        onVADMisfire: () => this.set({ status: 'listening' }),
+        onVADMisfire: () => {
+          this.set({ status: 'listening', heard: '' });
+          this.feedback('Too short, try again', false, true);
+        },
         onSpeechEnd: (audio: Float32Array) => void this.handleSpeech(audio),
       } as never);
       this.vad = vad as unknown as typeof this.vad;
@@ -239,6 +302,7 @@ class VoiceEngine {
     await this.vad?.destroy().catch(() => undefined);
     this.vad = null;
     this.release();
+    this.feedback('');
     this.set({ status: 'off', level: 0, awaiting: false });
   }
 
@@ -248,14 +312,20 @@ class VoiceEngine {
 
   private async handleSpeech(audio: Float32Array) {
     if (!this.stt) return;
-    this.set({ status: 'thinking' });
+    this.feedback('Transcribing…');
+    this.set({ status: 'thinking', heard: '…' });
     const id = this.nextId++;
     const text = await new Promise<string>((resolve) => {
       this.sttWait.set(id, resolve);
       this.stt!.postMessage({ type: 'transcribe', id, audio, language: this.state.prefs.language, model: this.state.prefs.sttModel }, [audio.buffer]);
     });
+    if (this.state.status === 'off') return;
     this.set({ heard: text, status: this.state.status === 'thinking' ? 'listening' : this.state.status });
-    if (text) this.onUtterance?.(text);
+    if (isNoise(text)) {
+      this.feedback('Not sure what you meant', false, true);
+      return;
+    }
+    this.onUtterance?.(text);
   }
 
   private enqueue(samples: Float32Array, rate: number, last: boolean, id: number) {
@@ -269,7 +339,7 @@ class VoiceEngine {
     src.start(at);
     this.playhead = at + buf.duration;
     this.playing.push(src);
-    this.set({ status: 'speaking' });
+    this.set({ status: 'speaking', activeEngine: 'kokoro' });
     src.onended = () => {
       this.playing = this.playing.filter((p) => p !== src);
       if (last && this.playing.length === 0 && id === this.speakId) {
@@ -286,27 +356,19 @@ class VoiceEngine {
     if (!clean) return Promise.resolve();
     // Never silent: the OS voice covers the first-ever download; after that Kokoro is used.
     if (this.state.prefs.engine === 'system') return this.speakSystem(clean);
-    if (!this.ready.voice && (this.tts === null || this.loadingVoice())) {
-      if (this.tts === null) {
-        this.workers();
-        this.tts!.postMessage({ type: 'load' });
-      }
+    if (!this.ready.voice) {
+      if (this.state.natural === 'unloaded') this.preload();
       return this.speakSystem(clean);
     }
     this.workers();
     this.stopSpeaking();
     const id = this.nextId++;
     this.speakId = id;
-    this.set({ said: clean });
+    this.set({ said: clean, activeEngine: 'kokoro' });
     return new Promise<void>((resolve) => {
       this.speakDone.set(id, resolve);
       this.tts!.postMessage({ type: 'speak', id, text: clean, voice: this.state.prefs.voice, speed: this.state.prefs.speed });
     });
-  }
-
-  private loadingVoice(): boolean {
-    // Loading for real (downloading files), not just a warm cache that will be ready in a second.
-    return Object.values(this.progressByFile.voice).some((p) => p < 100);
   }
 
   /** Lightweight path: the operating system's own voice via the Web Speech API. */
@@ -316,7 +378,7 @@ class VoiceEngine {
     this.stopSpeaking();
     const id = this.nextId++;
     this.speakId = id;
-    this.set({ said: text });
+    this.set({ said: text, activeEngine: 'system' });
     const voices = synth.getVoices();
     const lang = this.state.prefs.language === 'auto' ? 'en' : this.state.prefs.language;
     const pick =
@@ -375,4 +437,18 @@ export const voice = new VoiceEngine();
 
 export function useVoice(): VoiceState {
   return useSyncExternalStore(voice.subscribe, () => voice.state);
+}
+
+/** Shared wording keeps the dock and Settings honest about the actual speaker. */
+export function voiceEngineStatus(v: VoiceState): string {
+  const device = v.device === 'webgpu' ? 'Graphics card (WebGPU)' : 'CPU (WASM)';
+  const system = v.status === 'speaking' ? v.activeEngine === 'system' : v.prefs.engine === 'system' || v.natural !== 'ready';
+  let label = system ? 'System voice' : 'Natural voice';
+  if (v.prefs.engine === 'kokoro') {
+    if (v.natural === 'failed') label += ' \u00b7 natural voice failed to load: ' + v.naturalError;
+    else if (v.natural === 'loading') label += ' \u00b7 natural voice downloading ' + v.progress.voice + '%';
+    else if (v.natural === 'ready') label += system ? ' \u00b7 natural voice ready on ' + device : ' \u00b7 ' + device;
+    else label += ' \u00b7 natural voice not loaded';
+  }
+  return label;
 }

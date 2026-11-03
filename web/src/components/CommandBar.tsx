@@ -26,7 +26,11 @@ interface Preview {
   holdUntil: string | null;
 }
 
-export function CommandBar({ autoFocus, onCreated, compact }: { autoFocus?: boolean; onCreated?: (t: Task) => void; compact?: boolean }) {
+/**
+ * `asConversation`: sending opens a conversation on Ask (answered right away, like the Ask page);
+ * "Save to inbox" still parks a task. Without it (the New task sheet) everything becomes a task.
+ */
+export function CommandBar({ autoFocus, onCreated, compact, asConversation }: { autoFocus?: boolean; onCreated?: (t: Task) => void; compact?: boolean; asConversation?: boolean }) {
   const [text, setText] = useState('');
   const [pref, setPref] = useState<'auto' | AgentId>('auto');
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -75,6 +79,13 @@ export function CommandBar({ autoFocus, onCreated, compact }: { autoFocus?: bool
     const [title, ...rest] = value.split('\n');
     setBusy(true);
     try {
+      if (asConversation && run) {
+        const { conversation } = await post<{ conversation: Task }>('/api/conversations', { text: value, agent: pref });
+        setText('');
+        setPreview(null);
+        navigate(`/c/${conversation.id}`);
+        return;
+      }
       const { task } = await post<{ task: Task }>('/api/tasks', { title, body: rest.join('\n').trim(), agent_pref: pref, run });
       setText('');
       setPreview(null);

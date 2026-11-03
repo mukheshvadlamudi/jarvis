@@ -6,6 +6,7 @@ import { navigate } from '../lib/router.ts';
 import { toast, toastError } from '../lib/toast.ts';
 import type { AgentId, RunEvent, Task } from '../lib/types.ts';
 import { Link, Segmented, StatusLabel } from './ui.tsx';
+import { Markdown } from '../lib/markdown.tsx';
 
 const NAME: Record<string, string> = { claude: 'Claude', codex: 'Codex' };
 const other = (a: string | null | undefined): AgentId => (a === 'codex' ? 'claude' : 'codex');
@@ -27,7 +28,7 @@ export function ConsultBlock({ asked, answered }: { asked: RunEvent; answered?: 
       {answered ? (
         <div className="consult-a">
           <CornerDownRight size={14} strokeWidth={1.5} style={{ flex: 'none', marginTop: 2 }} />
-          <span>{String(answered.payload.answer ?? '')}</span>
+          <Markdown source={String(answered.payload.answer ?? '')} />
         </div>
       ) : null}
     </div>

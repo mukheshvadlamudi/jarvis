@@ -3,10 +3,12 @@
 import { KokoroTTS, env } from 'kokoro-js';
 import { sentences } from './speech.ts';
 
-type In = { type: 'load' } | { type: 'speak'; id: number; text: string; voice: string; speed: number } | { type: 'cancel' } | { type: 'prewarm'; phrases: string[]; voice: string; speed: number };
+type In = { type: 'load'; quality: 'best' | 'light' } | { type: 'speak'; id: number; text: string; voice: string; speed: number } | { type: 'cancel' } | { type: 'prewarm'; phrases: string[]; voice: string; speed: number };
 
 let tts: KokoroTTS | null = null;
 let current = 0;
+let quality: 'best' | 'light' = 'best';
+let device: 'webgpu' | 'wasm' = 'wasm';
 /** Rendered short phrases ("Yes?", "On it.") play instantly the next time. */
 const cache = new Map<string, { samples: Float32Array; rate: number }>();
 const CACHE_MAX = 80;
@@ -16,7 +18,14 @@ async function render(model: KokoroTTS, text: string, voice: string, speed: numb
   const k = key(voice, speed, text);
   const hit = cache.get(k);
   if (hit) return { samples: hit.samples.slice(), rate: hit.rate };
-  const audio = await model.generate(text, { voice: voice as never, speed });
+  let audio;
+  try {
+    audio = await model.generate(text, { voice: voice as never, speed });
+  } catch (err) {
+    if (device !== 'webgpu') throw err;
+    model = await fallback(err);
+    audio = await model.generate(text, { voice: voice as never, speed });
+  }
   const out = { samples: audio.audio as Float32Array, rate: audio.sampling_rate };
   if (text.length <= 48) {
     if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!);
@@ -27,55 +36,88 @@ async function render(model: KokoroTTS, text: string, voice: string, speed: numb
 let loading: Promise<KokoroTTS> | null = null;
 const post = (m: unknown, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
 
+async function create(device: 'webgpu' | 'wasm', dtype: 'fp32' | 'q8') {
+  return KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
+    dtype, device,
+    progress_callback: (p: { status: string; progress?: number; file?: string }) => {
+      if (p.status === 'progress') post({ type: 'progress', what: 'voice', file: p.file, progress: p.progress ?? 0 });
+    },
+  });
+}
+
+async function fallback(err: unknown): Promise<KokoroTTS> {
+  device = 'wasm';
+  cache.clear();
+  post({ type: 'diagnostic', fallback: 'WebGPU failed: ' + (err as Error).message + ' \u00b7 using CPU (WASM), q8' });
+  const previous = tts;
+  tts = null;
+  await previous?.model.dispose().catch(() => undefined);
+  const model = await create('wasm', 'q8');
+  tts = model;
+  post({ type: 'ready', what: 'voice', device });
+  return model;
+}
+
 async function load(): Promise<KokoroTTS> {
   if (tts) return tts;
   loading ??= (async () => {
-    env.wasmPaths = `${self.location.origin}/voice-runtime/ort/`;
-    const webgpu = 'gpu' in navigator && !!(await (navigator as unknown as { gpu: { requestAdapter: () => Promise<unknown> } }).gpu.requestAdapter().catch(() => null));
-    const model = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
-      dtype: webgpu ? 'fp32' : 'q8',
-      device: webgpu ? 'webgpu' : 'wasm',
-      progress_callback: (p: { status: string; progress?: number; file?: string }) => {
-        if (p.status === 'progress') post({ type: 'progress', what: 'voice', file: p.file, progress: p.progress ?? 0 });
-      },
-    });
-    tts = model;
-    post({ type: 'ready', what: 'voice', device: webgpu ? 'webgpu' : 'wasm' });
-    return model;
-  })();
+    env.wasmPaths = self.location.origin + '/voice-runtime/ort/';
+    const gpu = (navigator as unknown as { gpu?: { requestAdapter: (opts?: { powerPreference: string }) => Promise<{ isFallbackAdapter?: boolean } | null> } }).gpu;
+    let adapter = null;
+    if (quality === 'best' && gpu) {
+      adapter = await gpu.requestAdapter().catch(() => null);
+      if (!adapter || adapter.isFallbackAdapter) adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' }).catch(() => null);
+    }
+    device = adapter && !adapter.isFallbackAdapter ? 'webgpu' : 'wasm';
+    post({ type: 'diagnostic', adapter: quality === 'light' ? 'WebGPU skipped \u00b7 Light uses CPU (WASM), q8' : device === 'webgpu' ? 'WebGPU adapter available \u00b7 fp32' : 'No hardware WebGPU adapter \u00b7 using CPU (WASM), fp32' });
+    try {
+      tts = await create(device, quality === 'light' ? 'q8' : 'fp32');
+    } catch (err) {
+      if (device !== 'webgpu') throw err;
+      return fallback(err);
+    }
+    post({ type: 'ready', what: 'voice', device });
+    return tts;
+  })().catch((err) => { loading = null; throw err; });
   return loading;
 }
 
-self.onmessage = async (e: MessageEvent<In>) => {
-  const m = e.data;
+async function handle(m: Exclude<In, { type: 'cancel' }>) {
   try {
     if (m.type === 'load') {
+      quality = m.quality;
       await load();
-      return;
-    }
-    if (m.type === 'cancel') {
-      current = 0;
       return;
     }
     if (m.type === 'prewarm') {
       // Warm the runtime and cache the replies Jarvis says most, while idle.
-      const model = await load();
+      await load();
       for (const p of m.phrases) {
-        if (current) await new Promise((r) => setTimeout(r, 250));
-        await render(model, p, m.voice, m.speed);
+        if (current) return;
+        await render(tts!, p, m.voice, m.speed);
       }
       return;
     }
-    current = m.id;
-    const model = await load();
+    if (current !== m.id) return;
+    await load();
     const chunks = sentences(m.text);
     for (const [i, chunk] of chunks.entries()) {
       if (current !== m.id) return; // superseded (barge-in or a newer reply)
-      const { samples, rate } = await render(model, chunk, m.voice, m.speed);
+      const { samples, rate } = await render(tts!, chunk, m.voice, m.speed);
+      if (current !== m.id) return;
       post({ type: 'audio', id: m.id, index: i, last: i === chunks.length - 1, samples, rate }, [samples.buffer]);
     }
     if (current === m.id) current = 0;
   } catch (err) {
     post({ type: 'error', what: 'voice', id: 'id' in m ? m.id : null, message: (err as Error).message });
   }
+};
+
+// Serialise inference, including prewarming; cancellation remains immediate.
+let queue: Promise<void> = Promise.resolve();
+self.onmessage = (e: MessageEvent<In>) => {
+  const m = e.data;
+  if (m.type === 'cancel') { current = 0; return; }
+  if (m.type === 'speak') current = m.id;
+  queue = queue.then(() => handle(m));
 };

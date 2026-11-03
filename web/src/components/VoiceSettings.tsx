@@ -1,17 +1,17 @@
 import { Download, Play } from 'lucide-react';
 import { Segmented, Switch } from './ui.tsx';
-import { VOICES, voice, useVoice } from '../voice/engine.ts';
+import { VOICES, voice, useVoice, voiceEngineStatus } from '../voice/engine.ts';
 import type { VoicePrefs } from '../voice/engine.ts';
 import { VoiceToggle } from './VoiceDock.tsx';
 
 function Line({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-      <div className="row-stack" style={{ flex: '1 1 220px' }}>
+      <div className="row-stack" style={{ flex: '1 1 220px', minWidth: 0 }}>
         <span style={{ fontWeight: 500, fontSize: 13 }}>{label}</span>
-        {hint ? <span className="sub" style={{ whiteSpace: 'normal' }}>{hint}</span> : null}
+        {hint ? <span className="sub" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{hint}</span> : null}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>{children}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', maxWidth: '100%', minWidth: 0 }}>{children}</div>
     </div>
   );
 }
@@ -46,7 +46,7 @@ export function VoiceSettings() {
         label="Voice engine"
         hint={
           p.engine === 'kokoro'
-            ? 'Kokoro 82M — natural neural voice. One-time ~90 MB download; uses about 600 MB of RAM while voice is on (freed when off). Fastest with a GPU.'
+            ? 'Kokoro 82M — natural neural voice. Best quality uses a larger fp32 model and more memory. Fastest with a graphics card; memory is freed when voice is off.'
             : 'Your operating system’s voice — instant and uses no extra memory, but sounds more robotic. Pick a “Natural”/“Enhanced” voice in your OS settings for the best result.'
         }
       >
@@ -60,9 +60,18 @@ export function VoiceSettings() {
           ]}
         />
       </Line>
+      <Line label="Voice status" hint={[voiceEngineStatus(v), v.adapter, v.fallback].filter(Boolean).join(' \u00b7 ')}>
+        {p.engine === 'kokoro' && v.natural === 'failed' ? <button className="btn ghost sm" onClick={() => voice.retryVoice()}>Retry loading</button> : null}
+      </Line>
+      {p.engine === 'kokoro' ? <Line label="Voice quality" hint="Best uses fp32 on your graphics card when available, or on CPU. Light uses q8 on CPU to save memory.">
+        <select className="input" aria-label="Voice quality" value={p.voiceQuality} onChange={(e) => voice.setPrefs({ voiceQuality: e.target.value as VoicePrefs['voiceQuality'] })} style={{ width: '100%', maxWidth: 300 }}>
+          <option value="best">Best (graphics card if available)</option>
+          <option value="light">Light (less memory)</option>
+        </select>
+      </Line> : null}
       <Line label="Voice">
         {p.engine === 'kokoro' ? (
-          <select className="input" aria-label="Voice" value={p.voice} onChange={(e) => voice.setPrefs({ voice: e.target.value })} style={{ width: 240 }}>
+          <select className="input" aria-label="Voice" value={p.voice} onChange={(e) => voice.setPrefs({ voice: e.target.value })} style={{ width: '100%', maxWidth: 300 }}>
             {VOICES.map((o) => (
               <option key={o.id} value={o.id}>
                 {o.label}
@@ -82,7 +91,7 @@ export function VoiceSettings() {
           {p.speed.toFixed(2)}×
         </span>
       </Line>
-      <Line label="Wake word" hint="On: only speech starting with “Jarvis” counts (right after Jarvis speaks you can reply without it). Off: everything you say is a command.">
+      <Line label="Wake word" hint="On: only what you say with “Jarvis” near the start is acted on (right after Jarvis speaks you can reply without it). Off: everything you say is a command.">
         <Switch label="Wake word" checked={p.wakeWord} onChange={(wakeWord) => voice.setPrefs({ wakeWord })} />
       </Line>
       <Line label="Speech recognition" hint="Whisper, on this device. RAM while on: Tiny ~200 MB, Base ~300 MB, Small ~600 MB. Base is the best balance of speed and accuracy.">
