@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { isNoise } from './intents.ts';
+import { isEcho, isNoise, parseUtterance } from './intents.ts';
 import { sentences } from './speech.ts';
 import { openMicrophone, resolveMic } from './microphone.ts';
 import { modelLoadLabel } from './loading.ts';
@@ -95,6 +95,15 @@ export interface VoiceState {
 
 type Listener = () => void;
 
+/** How long a transcription may take once Whisper is loaded, and while it is still downloading. */
+export const STT_READY_MS = 20_000;
+export const STT_LOADING_MS = 120_000;
+const MAX_STT_RESTARTS = 3;
+/** No audio from the natural voice for this long means its worker is stuck. */
+export const TTS_CHUNK_MS = 45_000;
+export const HELD_LINE_MS = 60_000;
+const STALLED_STT = 'Speech recognition stalled, please say that again';
+
 /**
  * Local voice engine: Kokoro TTS + Whisper STT in workers, Silero VAD on the mic.
  * Nothing leaves the device and nothing costs credits.
@@ -116,7 +125,12 @@ class VoiceEngine {
   /** The newest line asked for while the natural voice was still loading. */
   private held: { text: string; at: number; resolve: () => void } | null = null;
   private speakDone: Map<number, () => void> = new Map();
-  private sttWait: Map<number, (t: string) => void> = new Map();
+  /** Resolves a transcription: the text, or null when it was dropped (superseded, stalled, released). */
+  private sttWait: Map<number, (t: string | null) => void> = new Map();
+  private sttRestarts = 0;
+  private speakTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The line Jarvis was saying when the current speech segment began ('' if it was quiet). */
+  private segmentSaid = '';
   private ready = { voice: false, ears: false };
   onUseHeard: ((text: string) => Promise<void>) | null = null;
   onUtterance: ((text: string) => void) | null = null;
@@ -204,8 +218,10 @@ class VoiceEngine {
     } else if (m.type === 'audio' && m.samples && m.id === this.speakId) {
       this.enqueue(m.samples, m.rate ?? 24000, !!m.last, m.id);
     } else if (m.type === 'text' && m.id !== undefined) {
+      this.sttRestarts = 0;
       this.sttWait.get(m.id)?.(m.text ?? '');
-      this.sttWait.delete(m.id);
+    } else if (m.type === 'superseded' && m.id !== undefined) {
+      this.sttWait.get(m.id)?.(null);
     } else if (m.type === 'error') {
       if (m.what) this.set({ loads: { ...this.state.loads, [m.what]: { status: 'failed', loaded: 0, total: 0 } } });
       if (m.what === 'voice') {
@@ -238,7 +254,8 @@ class VoiceEngine {
     if (!this.stt) {
       this.stt = new Worker(new URL('./stt.worker.ts', import.meta.url), { type: 'module' });
       this.stt.onmessage = this.onWorker;
-      this.stt.onerror = (e) => this.onWorker({ data: { type: 'error', what: 'ears', message: e.message } } as MessageEvent);
+      // A crash posts no request id, so drain every waiting request and start a fresh worker.
+      this.stt.onerror = (e) => this.restartStt('Speech recognition crashed, please say that again', e?.message);
     }
   }
 
@@ -267,8 +284,7 @@ class VoiceEngine {
     this.tts = null;
     this.stt = null;
     this.ready = { voice: false, ears: false };
-    for (const r of this.sttWait.values()) r('');
-    this.sttWait.clear();
+    this.drainStt();
     this.set({ loads: {}, progress: { voice: 0, ears: 0 }, device: null, natural: 'unloaded', naturalError: null, activeEngine: null, adapter: '', fallback: '' });
   }
 
@@ -349,10 +365,10 @@ class VoiceEngine {
             if (Math.abs(p.isSpeech - this.state.level) > 0.05) this.set({ level: p.isSpeech });
           },
           onSpeechStart: () => {
-            // Barge-in: talking over Jarvis stops it.
-            if (this.state.status === 'speaking') this.stopSpeaking();
+            // Don't stop Jarvis yet: this may be its own voice from the speakers. handleSpeech decides.
+            this.segmentSaid = this.speaking() ? this.state.said : '';
             this.feedback('');
-            this.set({ status: 'hearing' });
+            if (!this.segmentSaid) this.set({ status: 'hearing' });
           },
           onVADMisfire: () => {
             this.set({ status: 'listening', heard: '' });
@@ -388,23 +404,91 @@ class VoiceEngine {
     this.set({ awaiting });
   }
 
+  private speaking(): boolean {
+    return this.speakDone.has(this.speakId);
+  }
+
   private async handleSpeech(audio: Float32Array) {
+    const echoOf = this.segmentSaid;
+    this.segmentSaid = '';
     if (!this.stt) return;
-    this.feedback('Transcribing…');
-    this.set({ status: 'thinking', heard: '…' });
-    const id = this.nextId++;
     const generation = this.micGeneration;
-    const text = await new Promise<string>((resolve) => {
-      this.sttWait.set(id, resolve);
-      this.stt!.postMessage({ type: 'transcribe', id, audio, language: this.state.prefs.language, model: this.state.prefs.sttModel }, [audio.buffer]);
-    });
+    if (!echoOf) {
+      this.feedback('Transcribing…');
+      this.set({ status: 'thinking', heard: '…' });
+    }
+    const text = await this.transcribe(audio);
     if (this.state.status === 'off' || generation !== this.micGeneration) return;
-    this.set({ heard: text, status: this.state.status === 'thinking' ? 'listening' : this.state.status });
+    if (this.state.status === 'thinking') this.set({ status: 'listening' });
+    if (text === null) return;
+    if (echoOf && isEcho(text, echoOf)) return;
+    this.set({ heard: text });
     if (isNoise(text)) {
-      this.feedback('Not sure what you meant', false, true);
+      if (!echoOf) this.feedback('Not sure what you meant', false, true);
       return;
     }
+    // Barge-in: a real command (not noise, not Jarvis's own voice) stops Jarvis mid-line.
+    if (this.speaking() && parseUtterance(text, { requireWake: this.state.prefs.wakeWord, awaiting: this.state.awaiting }).kind !== 'ignore') this.stopSpeaking();
     this.onUtterance?.(text);
+  }
+
+  /** Send audio to Whisper with a deadline, so one stuck run can't stall the voice loop. */
+  private transcribe(audio: Float32Array): Promise<string | null> {
+    const id = this.nextId++;
+    const loaded = this.ready.ears;
+    return new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => {
+        if (!this.sttWait.has(id)) return;
+        if (loaded && this.ready.ears) return this.restartStt(STALLED_STT);
+        // Still downloading: drop this request but don't restart, which would restart the download.
+        this.sttWait.get(id)?.(null);
+        this.feedback('Speech model is still loading · try again in a moment', false, true);
+      }, loaded ? STT_READY_MS : STT_LOADING_MS);
+      this.sttWait.set(id, (t) => {
+        clearTimeout(timer);
+        this.sttWait.delete(id);
+        resolve(t);
+      });
+      this.stt!.postMessage({ type: 'transcribe', id, audio, language: this.state.prefs.language, model: this.state.prefs.sttModel }, [audio.buffer]);
+    });
+  }
+
+  private drainStt() {
+    for (const r of [...this.sttWait.values()]) r(null);
+    this.sttWait.clear();
+  }
+
+  /** Replace a stuck or crashed Whisper worker; give up after a few tries. */
+  private restartStt(message: string, detail?: string) {
+    this.drainStt();
+    this.stt?.terminate();
+    this.stt = null;
+    this.ready.ears = false;
+    if (this.state.status === 'thinking' || this.state.status === 'hearing') this.set({ status: this.vad ? 'listening' : 'idle' });
+    if (++this.sttRestarts > MAX_STT_RESTARTS) {
+      this.set({ status: 'error', error: 'Speech recognition keeps failing' + (detail ? ': ' + detail : '') + '. Turn voice off and on again, or pick a smaller model in Settings → Voice.', loads: { ...this.state.loads, ears: { status: 'failed', loaded: 0, total: 0 } } });
+      return;
+    }
+    this.workers();
+    this.set({ loads: { ...this.state.loads, ears: { status: 'loading', loaded: 0, total: 0 } }, progress: { ...this.state.progress, ears: 0 } });
+    this.stt!.postMessage({ type: 'load', model: this.state.prefs.sttModel });
+    void this.speak(message);
+    this.feedback(message, false, true);
+  }
+
+  private clearSpeakTimer() {
+    if (this.speakTimer) clearTimeout(this.speakTimer);
+    this.speakTimer = null;
+  }
+
+  /** If the natural voice sends no audio for a while, its worker is stuck: stop and reload it. */
+  private armVoiceWatchdog(id: number) {
+    this.clearSpeakTimer();
+    this.speakTimer = setTimeout(() => {
+      if (id !== this.speakId) return;
+      this.stopSpeaking();
+      this.retryVoice();
+    }, TTS_CHUNK_MS);
   }
 
   private enqueue(samples: Float32Array, rate: number, last: boolean, id: number) {
@@ -419,9 +503,16 @@ class VoiceEngine {
     this.playhead = at + buf.duration;
     this.playing.push(src);
     this.set({ status: 'speaking', activeEngine: 'kokoro' });
+    if (!last) this.armVoiceWatchdog(id);
+    else {
+      // onended can go missing (suspended context, device change): resolve after playback + 3 s anyway.
+      this.clearSpeakTimer();
+      this.speakTimer = setTimeout(() => id === this.speakId && this.stopSpeaking(), Math.max(0, this.playhead - ctx.currentTime) * 1000 + 3000);
+    }
     src.onended = () => {
       this.playing = this.playing.filter((p) => p !== src);
       if (last && this.playing.length === 0 && id === this.speakId) {
+        this.clearSpeakTimer();
         this.set({ status: this.vad ? 'listening' : 'idle' });
         this.speakDone.get(id)?.();
         this.speakDone.delete(id);
@@ -444,7 +535,16 @@ class VoiceEngine {
       // Hold the newest line and say it the moment the natural voice is ready (no robotic stand-in).
       this.held?.resolve();
       this.feedback('Natural voice is loading · Jarvis will say this when it is ready');
-      return new Promise<void>((resolve) => (this.held = { text: clean, at: Date.now(), resolve }));
+      return new Promise<void>((resolve) => {
+        const held = { text: clean, at: Date.now(), resolve };
+        this.held = held;
+        // Don't keep the caller waiting forever if the voice never becomes ready.
+        setTimeout(() => {
+          if (this.held !== held) return;
+          this.held = null;
+          resolve();
+        }, HELD_LINE_MS);
+      });
     }
     this.workers();
     this.stopSpeaking();
@@ -453,6 +553,7 @@ class VoiceEngine {
     this.set({ said: clean, activeEngine: 'kokoro' });
     return new Promise<void>((resolve) => {
       this.speakDone.set(id, resolve);
+      this.armVoiceWatchdog(id);
       this.tts!.postMessage({ type: 'speak', id, text: clean, voice: this.state.prefs.voice, speed: this.state.prefs.speed });
     });
   }
@@ -484,6 +585,7 @@ class VoiceEngine {
         if (i === parts.length - 1) {
           u.onend = u.onerror = () => {
             if (id !== this.speakId) return;
+            this.clearSpeakTimer();
             this.set({ status: this.vad ? 'listening' : 'idle' });
             this.speakDone.get(id)?.();
             this.speakDone.delete(id);
@@ -491,10 +593,14 @@ class VoiceEngine {
         }
         synth.speak(u);
       });
+      // Chrome sometimes never fires onend: cap the wait by an estimate of the speaking time.
+      this.clearSpeakTimer();
+      this.speakTimer = setTimeout(() => id === this.speakId && this.stopSpeaking(), systemSpeechMs(text, this.state.prefs.speed));
     });
   }
 
   stopSpeaking() {
+    this.clearSpeakTimer();
     this.tts?.postMessage({ type: 'cancel' });
     if (typeof speechSynthesis !== 'undefined' && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel();
     for (const p of this.playing) {
@@ -517,6 +623,11 @@ class VoiceEngine {
   chunks(text: string) {
     return sentences(text);
   }
+}
+
+/** Upper bound for an OS-voice line: about 14 characters a second at speed 1, plus 5 s slack. */
+export function systemSpeechMs(text: string, speed: number): number {
+  return Math.round((text.length / 14 / Math.max(0.5, speed)) * 1000) + 5000;
 }
 
 export const voice = new VoiceEngine();

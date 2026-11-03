@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const vad = vi.hoisted(() => ({ options: null as null | { onVADMisfire: () => void; onSpeechEnd: (audio: Float32Array) => void; getStream: () => Promise<MediaStream>; positiveSpeechThreshold: number; negativeSpeechThreshold: number; minSpeechMs: number } }));
+const vad = vi.hoisted(() => ({ options: null as null | { onSpeechStart: () => void; onVADMisfire: () => void; onSpeechEnd: (audio: Float32Array) => void; getStream: () => Promise<MediaStream>; positiveSpeechThreshold: number; negativeSpeechThreshold: number; minSpeechMs: number } }));
 vi.mock('@ricky0123/vad-web', () => ({ MicVAD: { new: async (options: typeof vad.options) => {
   vad.options = options;
   let stream: MediaStream | undefined;
@@ -176,5 +176,135 @@ describe('voice engine feedback and preferences', () => {
     await engine.voice.speak('Hello again');
     expect(speak).not.toHaveBeenCalled();
     expect(engine.voice.state.outcome).toContain('retry in Settings');
+  });
+
+  describe('stall recovery', () => {
+    const sttRequest = (worker: FakeWorker) => worker.postMessage.mock.calls.map(([m]) => m).filter((m) => m.type === 'transcribe').at(-1);
+    const listening = async () => {
+      await engine.voice.start();
+      const utterance = vi.fn();
+      engine.voice.onUtterance = utterance;
+      return utterance;
+    };
+
+    it('restarts a stuck Whisper worker after 20 s once it is loaded', async () => {
+      const utterance = await listening();
+      workers[1].emit({ type: 'ready', what: 'ears' });
+      vad.options!.onSpeechEnd(new Float32Array(16000));
+      await vi.advanceTimersByTimeAsync(engine.STT_READY_MS - 1);
+      expect(workers[1].terminate).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(workers[1].terminate).toHaveBeenCalled();
+      expect(workers[2].postMessage).toHaveBeenCalledWith({ type: 'load', model: 'whisper-base' });
+      expect(engine.voice.state.outcome).toBe('Speech recognition stalled, please say that again');
+      expect(engine.voice.state.status).toBe('listening');
+      expect(utterance).not.toHaveBeenCalled();
+    });
+
+    it('drops, but does not restart, a request that times out while the model downloads', async () => {
+      const utterance = await listening();
+      vad.options!.onSpeechEnd(new Float32Array(16000));
+      await vi.advanceTimersByTimeAsync(engine.STT_READY_MS);
+      expect(engine.voice.state.status).toBe('thinking');
+      await vi.advanceTimersByTimeAsync(engine.STT_LOADING_MS - engine.STT_READY_MS);
+      expect(workers[1].terminate).not.toHaveBeenCalled();
+      expect(workers).toHaveLength(2);
+      expect(engine.voice.state.status).toBe('listening');
+      expect(utterance).not.toHaveBeenCalled();
+    });
+
+    it('recovers from a worker crash and gives up after three restarts', async () => {
+      await listening();
+      for (let i = 1; i <= 3; i++) {
+        vad.options!.onSpeechEnd(new Float32Array(16000));
+        (workers.at(-1)!.onerror as (e: { message: string }) => void)({ message: 'boom' });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(engine.voice.state.status).toBe('listening');
+      }
+      (workers.at(-1)!.onerror as (e: { message: string }) => void)({ message: 'boom' });
+      expect(engine.voice.state.status).toBe('error');
+      expect(engine.voice.state.error).toContain('keeps failing: boom');
+    });
+
+    it('drops a superseded segment silently', async () => {
+      const utterance = await listening();
+      vad.options!.onSpeechEnd(new Float32Array(16000));
+      workers[1].emit({ type: 'superseded', id: sttRequest(workers[1]).id });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(utterance).not.toHaveBeenCalled();
+      expect(engine.voice.state.status).toBe('listening');
+      expect(engine.voice.state.outcome).toBe('Transcribing…');
+    });
+
+    it('reloads the natural voice when no audio arrives within 45 s', async () => {
+      engine.voice.preload();
+      workers[0].emit({ type: 'ready', what: 'voice' });
+      const done = vi.fn();
+      void engine.voice.speak('Hello there').then(done);
+      await vi.advanceTimersByTimeAsync(engine.TTS_CHUNK_MS);
+      expect(done).toHaveBeenCalled();
+      expect(workers[0].terminate).toHaveBeenCalled();
+      expect(workers.at(-1)!.postMessage).toHaveBeenCalledWith({ type: 'load', quality: 'best' });
+    });
+
+    it('resolves after the last chunk plays even if onended never fires', async () => {
+      vi.stubGlobal('AudioContext', class {
+        state = 'running'; currentTime = 0; destination = {};
+        createBuffer = (_c: number, length: number, rate: number) => ({ duration: length / rate, copyToChannel: () => {} });
+        createBufferSource = () => ({ connect: () => {}, start: () => {}, stop: () => {}, onended: null });
+      });
+      engine.voice.preload();
+      workers[0].emit({ type: 'ready', what: 'voice' });
+      const done = vi.fn();
+      void engine.voice.speak('Hello there').then(done);
+      const id = workers[0].postMessage.mock.calls.map(([m]) => m).find((m) => m.type === 'speak').id;
+      workers[0].emit({ type: 'audio', id, samples: new Float32Array(24000 * 2), rate: 24000, last: true });
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(done).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(done).toHaveBeenCalled();
+      expect(workers[0].terminate).not.toHaveBeenCalled();
+    });
+
+    it('caps system speech when the browser never fires onend', async () => {
+      vi.stubGlobal('speechSynthesis', { speak: vi.fn(), getVoices: () => [], cancel: vi.fn(), speaking: true, pending: false });
+      vi.stubGlobal('SpeechSynthesisUtterance', class { text: string; constructor(text: string) { this.text = text; } });
+      engine.voice.setPrefs({ engine: 'system' });
+      const done = vi.fn();
+      void engine.voice.speak('Short line.').then(done);
+      await vi.advanceTimersByTimeAsync(engine.systemSpeechMs('Short line.', 1) - 1);
+      expect(done).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(done).toHaveBeenCalled();
+    });
+
+    it('releases a held line after 60 s if the voice never loads', async () => {
+      const done = vi.fn();
+      void engine.voice.speak('Hello').then(done);
+      await vi.advanceTimersByTimeAsync(engine.HELD_LINE_MS);
+      expect(done).toHaveBeenCalled();
+    });
+
+    it('ignores its own voice but lets a real command interrupt', async () => {
+      const utterance = await listening();
+      workers[0].emit({ type: 'ready', what: 'voice' });
+      workers[1].emit({ type: 'ready', what: 'ears' });
+      void engine.voice.speak('Your backups run daily at two in the morning.');
+      workers[0].postMessage.mockClear();
+      vad.options!.onSpeechStart();
+      expect(workers[0].postMessage).not.toHaveBeenCalledWith({ type: 'cancel' });
+      vad.options!.onSpeechEnd(new Float32Array(16000));
+      workers[1].emit({ type: 'text', id: sttRequest(workers[1]).id, text: 'backups run daily at two' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(utterance).not.toHaveBeenCalled();
+      expect(workers[0].postMessage).not.toHaveBeenCalledWith({ type: 'cancel' });
+
+      vad.options!.onSpeechStart();
+      vad.options!.onSpeechEnd(new Float32Array(16000));
+      workers[1].emit({ type: 'text', id: sttRequest(workers[1]).id, text: 'Jarvis, stop.' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(workers[0].postMessage).toHaveBeenCalledWith({ type: 'cancel' });
+      expect(utterance).toHaveBeenCalledWith('Jarvis, stop.');
+    });
   });
 });
