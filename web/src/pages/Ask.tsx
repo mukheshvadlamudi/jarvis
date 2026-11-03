@@ -4,12 +4,13 @@ import { AgentStrip } from '../components/AgentStrip.tsx';
 import { Composer } from '../components/Composer.tsx';
 import type { ComposerHandle } from '../components/Composer.tsx';
 import { Turn } from '../components/Thread.tsx';
-import { ErrorBox, Link, Sheet, Spinner } from '../components/ui.tsx';
+import { ErrorBox, Link, Spinner } from '../components/ui.tsx';
+import { Popover } from '../components/ask/Popover.tsx';
 import type { AgentStatus, ConversationSummary } from '../lib/ask.ts';
-import { agentName, sideLabel, useConversation } from '../lib/ask.ts';
+import { agentName, conversationTurns, runVisibility, useConversation } from '../lib/ask.ts';
 import { post } from '../lib/api.ts';
 import { shortAge } from '../lib/format.ts';
-import { useApi, useMedia, useNow } from '../lib/hooks.ts';
+import { useApi, useNow } from '../lib/hooks.ts';
 import { navigate } from '../lib/router.ts';
 import type { AgentId } from '../lib/types.ts';
 import type { PageProps } from '../routes.ts';
@@ -44,7 +45,7 @@ function HistoryList({ activeId, onPick }: { activeId: string | null; onPick: ()
       <ul className="ask-history-list">
         {(list.data?.conversations ?? []).map((c) => (
           <li key={c.id}>
-            <Link to={`/c/${c.id}`} className="ask-history-item" aria-current={c.id === activeId ? 'page' : undefined}>
+            <Link to={`/c/${c.id}`} onClick={onPick} className="ask-history-item" aria-current={c.id === activeId ? 'page' : undefined}>
               <span className="ask-history-title">
                 {c.status === 'running' ? <span className="dot live" /> : c.status === 'needs_you' ? <span className="dot" style={{ color: 'var(--warning)' }} /> : null}
                 {c.title}
@@ -56,6 +57,7 @@ function HistoryList({ activeId, onPick }: { activeId: string | null; onPick: ()
           </li>
         ))}
       </ul>
+      {list.error ? <ErrorBox error={list.error} onRetry={list.reload} /> : list.loading ? <span className="ask-loading"><Spinner /> Finding conversations</span> : null}
       {list.data && !list.data.conversations.length ? <p className="ask-history-empty">{q ? 'No conversation matches' : 'Your conversations show here'}</p> : null}
     </div>
   );
@@ -70,21 +72,33 @@ export default function Ask({ params }: PageProps) {
   const { data, error, live, reload } = useConversation(id);
   const agents = useApi<{ agents: Record<AgentId, AgentStatus>; threshold: number }>('/api/agents', ['agents.updated', 'usage.updated', 'run.started', 'run.finished']);
   const [agentOverride, setAgentOverride] = useState<Record<AgentId, AgentStatus> | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const wide = useMedia('(min-width: 1024px)');
+  const [panel, setPanel] = useState<'history' | 'agents' | null>(null);
+  const historyButton = useRef<HTMLButtonElement>(null);
+  const agentsButton = useRef<HTMLButtonElement>(null);
   const composer = useRef<ComposerHandle | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const now = useNow(1000);
-  const setHandle = useCallback((h: ComposerHandle) => (composer.current = h), []);
+  const setHandle = useCallback((h: ComposerHandle) => { composer.current = h; }, []);
 
   useEffect(() => setAgentOverride(null), [agents.data]);
   const agentState = agentOverride ?? agents.data?.agents ?? null;
 
-  const runs = data?.runs ?? [];
-  const running = !!data?.active || runs.some((r) => r.status === 'running' && !sideLabel(r));
-  const mainRuns = runs.filter((r) => !sideLabel(r));
+  const turns = conversationTurns(data?.runs ?? []);
+  const mainRuns = turns.map((t) => t.run);
+  const running = !!data?.active || turns.some((t) => [t.run, ...t.sides, ...t.consults].some((r) => r.status === 'running'));
   const lastAgent = (mainRuns.at(-1)?.agent as AgentId | undefined) ?? null;
+
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault(); e.stopImmediatePropagation(); setPanel('history');
+        document.querySelector<HTMLInputElement>('.ask-popover .ask-search input')?.focus();
+      }
+    };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  }, []);
 
   // Follow the answer as it streams, unless the owner scrolled up to read.
   useEffect(() => {
@@ -102,25 +116,16 @@ export default function Ask({ params }: PageProps) {
 
   return (
     <div className={`ask${id ? '' : ' empty-thread'}`}>
-      {wide ? (
-        <aside className="ask-history" aria-label="Conversations">
-          <HistoryList activeId={id} onPick={() => undefined} />
-        </aside>
-      ) : null}
       <section className="ask-main">
         <div className="ask-top">
-          {!wide ? (
-            <button className="btn ghost sm" onClick={() => setHistoryOpen(true)} aria-label="Conversations">
-              <History size={16} strokeWidth={1.5} />
+          <h1 className="ask-conversation-title" title={data?.conversation.title}>{data?.conversation.title ?? 'Ask'}</h1>
+          <nav aria-label="Conversation controls">
+            <button ref={historyButton} className="btn ghost sm" aria-label="History" aria-haspopup="dialog" aria-expanded={panel === 'history'} onClick={() => setPanel('history')}><History size={16} strokeWidth={1.5} /><span className="ask-control-label">History</span></button>
+            <button ref={agentsButton} className="btn ghost sm" aria-label="Agents" aria-haspopup="dialog" aria-expanded={panel === 'agents'} onClick={() => setPanel('agents')}>
+              <span className="ask-agent-dots">{(['claude', 'codex'] as const).map((a) => <span key={a} title={`${agentName(a)}: ${agentState?.[a]?.state ?? 'checking'}`} className={`dot${agentState?.[a]?.state === 'busy' ? ' live' : ''}`} style={{ color: agentState?.[a]?.state === 'busy' ? 'var(--accent)' : agentState?.[a]?.state === 'signed_out' ? 'var(--danger)' : agentState?.[a]?.state === 'limited' ? 'var(--warning)' : 'var(--text-faint)' }} />)}</span><span className="ask-control-label">Agents</span>
             </button>
-          ) : null}
-          <AgentStrip
-            agents={agentState}
-            threshold={agents.data?.threshold ?? 85}
-            picked=""
-            onPick={(a) => composer.current?.pick(a)}
-            onRefreshed={(a) => setAgentOverride(a)}
-          />
+            <button className="btn ghost sm" aria-label="New conversation" onClick={() => { navigate('/'); composer.current?.fill(''); }}><MessageSquarePlus size={16} strokeWidth={1.5} /><span className="ask-control-label">New</span></button>
+          </nav>
         </div>
 
         <div
@@ -134,8 +139,8 @@ export default function Ask({ params }: PageProps) {
           {error ? <ErrorBox error={error} onRetry={() => void reload()} /> : null}
           {!id ? (
             <div className="ask-welcome">
-              <h1>What should Claude or Codex do?</h1>
-              <p>Ask a question and it is answered right here, using your Claude and ChatGPT plans. You see what the agent is checking while it works.</p>
+              <h2>What should we work on?</h2>
+              <p>Think it through with Claude and Codex, using your own plans.</p>
               <div className="ask-examples">
                 {EXAMPLES.map((e) => (
                   <button key={e} className="ask-example" onClick={() => composer.current?.fill(e)}>
@@ -151,11 +156,13 @@ export default function Ask({ params }: PageProps) {
           ) : null}
           {data ? (
             <>
-              <h1 className="ask-title">{data.conversation.title}</h1>
-              {runs.map((r) => (
+              {turns.map(({ run: r, consults, sides }) => (
+                <div key={r.id}>
                 <Turn
                   key={r.id}
                   run={r}
+                  consults={consults}
+                  liveRuns={live}
                   live={live[r.id]}
                   approvals={data.approvals}
                   conversationId={data.conversation.id}
@@ -164,6 +171,8 @@ export default function Ask({ params }: PageProps) {
                   onAskOther={(a) => composer.current?.pick(a)}
                   onDecided={() => void reload()}
                 />
+                {sides.map((side) => <Turn key={side.id} run={side} live={live[side.id]} consults={data.runs.filter((r) => runVisibility(r) === 'activity' && r.parent_run_id === side.id)} liveRuns={live} approvals={data.approvals} conversationId={data.conversation.id} last={false} now={now} onAskOther={(a) => composer.current?.pick(a)} onDecided={() => void reload()} />)}
+                </div>
               ))}
             </>
           ) : null}
@@ -171,6 +180,7 @@ export default function Ask({ params }: PageProps) {
 
         <div className="ask-composer">
           <Composer
+            key={id ?? 'new'}
             conversationId={id}
             running={running}
             lastAgent={lastAgent}
@@ -186,10 +196,10 @@ export default function Ask({ params }: PageProps) {
           />
         </div>
       </section>
-      {historyOpen ? (
-        <Sheet title="Conversations" onClose={() => setHistoryOpen(false)}>
-          <HistoryList activeId={id} onPick={() => setHistoryOpen(false)} />
-        </Sheet>
+      {panel ? (
+        <Popover title={panel === 'history' ? 'History' : 'Agents'} anchor={panel === 'history' ? historyButton.current : agentsButton.current} search={panel === 'history'} onClose={() => setPanel(null)}>
+          {panel === 'history' ? <HistoryList activeId={id} onPick={() => setPanel(null)} /> : <AgentStrip agents={agentState} threshold={agents.data?.threshold ?? 85} picked="" onPick={(a) => { setPanel(null); requestAnimationFrame(() => composer.current?.pick(a)); }} onRefreshed={setAgentOverride} />}
+        </Popover>
       ) : null}
     </div>
   );

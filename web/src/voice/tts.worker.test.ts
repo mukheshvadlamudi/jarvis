@@ -7,7 +7,7 @@ describe('natural voice worker', () => {
   let worker: { location: { origin: string }; postMessage: ReturnType<typeof vi.fn>; onmessage: (event: { data: unknown }) => void };
   let gpu: { requestAdapter: ReturnType<typeof vi.fn> };
   const audio = () => ({ audio: new Float32Array([0, 1]), sampling_rate: 24000 });
-  const model = () => ({ generate: vi.fn(async () => audio()), model: { dispose: vi.fn(async () => {}) } });
+  const model = () => ({ generate: vi.fn(async (_text: string, _options?: unknown) => audio()), model: { dispose: vi.fn(async () => {}) } });
   const send = async (data: unknown) => { worker.onmessage({ data }); await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled()); };
   const settled = async (type: string) => vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type }), expect.any(Array)));
 
@@ -78,5 +78,32 @@ describe('natural voice worker', () => {
     await send({ type: 'load', quality: 'light' });
     await settled('error');
     expect(worker.postMessage).toHaveBeenCalledWith(expect.objectContaining({ what: 'voice', message: 'Download failed' }), []);
+  });
+
+  it('bounds every synthesis and preserves turn identity in audio', async () => {
+    const tts = model(); mock.create.mockResolvedValue(tts);
+    await send({ type: 'load', quality: 'light' }); await settled('ready');
+    const token = { turnId: 4, speechEpoch: 5, generation: 6 };
+    await send({ ...token, type: 'speak', id: 3, text: 'Saved safely. ' + 'Your files are available '.repeat(40), voice: 'af_heart', speed: 1 });
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'audio', last: true }), expect.any(Array)));
+    expect(tts.generate.mock.calls[0][0]).toBe('Saved safely.');
+    expect(tts.generate.mock.calls.every(([text]) => text.length <= 180)).toBe(true);
+    expect(worker.postMessage).toHaveBeenCalledWith(expect.objectContaining({ ...token, id: 3, type: 'audio' }), expect.any(Array));
+  });
+
+  it('acknowledges cancel after executing inference settles and never emits its obsolete audio', async () => {
+    const tts = model(); let finish: (value: ReturnType<typeof audio>) => void = () => {};
+    tts.generate.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    mock.create.mockResolvedValue(tts);
+    await send({ type: 'load', quality: 'light' }); await settled('ready');
+    worker.onmessage({ data: { type: 'speak', id: 1, text: 'Old line.', voice: 'af_heart', speed: 1 } });
+    await vi.waitFor(() => expect(tts.generate).toHaveBeenCalledOnce());
+    worker.onmessage({ data: { type: 'cancel', cancelId: 9 } });
+    expect(worker.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'cancelled' }), []);
+    worker.onmessage({ data: { type: 'speak', id: 2, text: 'Newest line.', voice: 'af_heart', speed: 1 } });
+    finish(audio()); await settled('cancelled'); await settled('audio');
+    expect(worker.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'cancelled', cancelId: 9 }), []);
+    expect(worker.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio', id: 1 }), expect.any(Array));
+    expect(worker.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'audio', id: 2 }), expect.any(Array));
   });
 });

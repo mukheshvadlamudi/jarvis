@@ -13,6 +13,12 @@ let source: EventSource | null = null;
 let state: 'connecting' | 'open' | 'closed' = 'closed';
 const stateListeners = new Set<() => void>();
 let retry = 1000;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let opened = false;
+let epoch: unknown = undefined;
+let generation = 0;
+
+function publish(e: LiveEvent) { listeners.forEach((l) => l(e)); }
 
 const TYPES = [
   'hello', 'task.created', 'task.updated', 'task.deleted', 'run.started', 'run.event', 'run.delta', 'run.finished', 'agents.updated',
@@ -30,33 +36,50 @@ export function connectLive(): void {
   const token = getToken();
   setState('connecting');
   source = new EventSource(`/api/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`);
+  const current = source;
+  const version = ++generation;
   source.onopen = () => {
+    if (source !== current || version !== generation) return;
     retry = 1000;
     setState('open');
+    if (opened) publish({ type: 'reconcile', data: { reason: 'reconnect' } });
+    opened = true;
   };
   source.onerror = () => {
-    source?.close();
+    if (source !== current || version !== generation) return;
+    current.close();
     source = null;
     setState('closed');
-    setTimeout(connectLive, retry);
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; connectLive(); }, retry);
     retry = Math.min(retry * 2, 15_000);
   };
   for (const t of TYPES) {
     source.addEventListener(t, (ev) => {
+      if (source !== current || version !== generation) return;
       let data: unknown = null;
       try {
         data = JSON.parse((ev as MessageEvent).data);
       } catch {
         data = null;
       }
-      listeners.forEach((l) => l({ type: t, data }));
+      const payload = data as { epoch?: unknown } | null;
+      if (t === 'hello' && payload?.epoch != null) {
+        if (epoch !== undefined && epoch !== payload.epoch) publish({ type: 'reconcile', data: { reason: 'epoch' } });
+        epoch = payload.epoch;
+      } else if (t === 'run.delta' && payload?.epoch != null && epoch != null && payload.epoch !== epoch) return;
+      publish({ type: t, data });
     });
   }
 }
 
 export function disconnectLive(): void {
+  generation++;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = null;
   source?.close();
   source = null;
+  opened = false;
+  epoch = undefined;
   setState('closed');
 }
 

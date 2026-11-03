@@ -35,6 +35,43 @@ export interface Uploaded {
 
 export interface ConversationRun extends Run {
   events: RunEvent[];
+  purpose?: RunPurpose | null;
+  visibility?: 'conversation' | 'activity' | 'internal' | null;
+  owner_text?: string | null;
+  parent_run_id?: string | null;
+}
+
+export type RunPurpose = 'user_reply' | 'both' | 'second_opinion' | 'consult' | 'learning' | 'handoff' | 'maintenance' | 'verify';
+type TypedRun = Run & { purpose?: RunPurpose | null; visibility?: 'conversation' | 'activity' | 'internal' | null; owner_text?: string | null; parent_run_id?: string | null };
+
+export function runPurpose(run: TypedRun): RunPurpose {
+  if (run.purpose != null) return run.purpose;
+  const reason = run.route_reason ?? '';
+  if (reason.startsWith('side:both:')) return 'both';
+  if (reason.startsWith('side:second opinion:')) return 'second_opinion';
+  if (reason.startsWith('consult:')) return 'consult';
+  if (reason.startsWith('learning')) return 'learning';
+  return 'user_reply';
+}
+
+export function runVisibility(run: TypedRun) {
+  return run.visibility ?? (['learning', 'maintenance', 'verify'].includes(runPurpose(run)) ? 'internal' : runPurpose(run) === 'consult' ? 'activity' : 'conversation');
+}
+
+/** Attach legacy side runs to the preceding owner turn; explicit parents always win. */
+export function conversationTurns(runs: ConversationRun[]) {
+  const turns: Array<{ run: ConversationRun; consults: ConversationRun[]; sides: ConversationRun[] }> = [];
+  for (const run of runs) {
+    if (runVisibility(run) === 'conversation' && !sideLabel(run)) turns.push({ run, consults: [], sides: [] });
+  }
+  for (const run of runs) {
+    if (runVisibility(run) === 'internal') continue;
+    if (runVisibility(run) !== 'activity' && !sideLabel(run)) continue;
+    const parentId = (run as TypedRun).parent_run_id;
+    const parent = parentId ? turns.find((t) => t.run.id === parentId) : turns.filter((t) => t.run.started_at <= run.started_at).at(-1);
+    if (parent) (runVisibility(run) === 'activity' ? parent.consults : parent.sides).push(run);
+  }
+  return turns;
 }
 
 export interface ConversationDetail {
@@ -58,13 +95,15 @@ export const NEW_MESSAGE = 'New message from the owner:\n';
 
 /** What the owner actually typed for this run (the history handed to a joining agent is hidden). */
 export function askedText(run: Run): string {
+  if ((run as TypedRun).owner_text != null) return (run as TypedRun).owner_text!;
   return (run.prompt ?? '').split(NEW_MESSAGE).pop()!.trim();
 }
 
 /** Side runs answer beside the main thread: "Codex answered too", "Codex checked Claude". */
 export function sideLabel(run: Run): { kind: 'both' | 'second opinion'; text: string } | null {
-  const m = /^side:(both|second opinion):(.*)$/.exec(run.route_reason ?? '');
-  return m ? { kind: m[1] as 'both' | 'second opinion', text: m[2] } : null;
+  const purpose = runPurpose(run);
+  return purpose === 'both' ? { kind: 'both', text: `${agentName(run.agent)} also answered` }
+    : purpose === 'second_opinion' ? { kind: 'second opinion', text: `${agentName(run.agent)}'s second opinion` } : null;
 }
 
 export const agentName = (a: string | null | undefined) => (a === 'claude' ? 'Claude' : a === 'codex' ? 'Codex' : 'Jarvis');
@@ -101,26 +140,42 @@ export function useConversation(id: string | null) {
   const [error, setError] = useState<Error | null>(null);
   const [live, setLive] = useState<Record<string, LiveRun>>({});
   const reloadTimer = useRef<number | null>(null);
+  const frame = useRef<number | null>(null);
+  const pending = useRef<Record<string, LiveRun>>({});
+  const completed = useRef(new Set<string>());
+  const generation = useRef(0);
   const idRef = useRef(id);
   idRef.current = id;
 
   const load = async (cid: string) => {
+    const version = ++generation.current;
     try {
       const d = await api<ConversationDetail>(`/api/conversations/${cid}`);
-      if (idRef.current === cid) {
+      if (idRef.current === cid && version === generation.current) {
+        completed.current = new Set(d.runs.filter((r) => r.status !== 'running').map((r) => r.id));
+        for (const rid of completed.current) delete pending.current[rid];
+        setLive({ ...pending.current });
         setData(d);
         setError(null);
       }
     } catch (err) {
-      if (idRef.current === cid) setError(err as Error);
+      if (idRef.current === cid && version === generation.current) setError(err as Error);
     }
   };
 
   useEffect(() => {
     setData(null);
+    pending.current = {};
+    completed.current.clear();
     setLive({});
     setError(null);
     if (id) void load(id);
+    return () => {
+      generation.current++;
+      if (reloadTimer.current) window.clearTimeout(reloadTimer.current);
+      if (frame.current !== null) window.cancelAnimationFrame(frame.current);
+      frame.current = null;
+    };
   }, [id]);
 
   useEffect(() => {
@@ -131,14 +186,22 @@ export function useConversation(id: string | null) {
     };
     return subscribeLive((e) => {
       const d = e.data ?? {};
+      if (e.type === 'reconcile') {
+        pending.current = {};
+        setLive({});
+        void Promise.all([load(id), api<{ active: Array<{ taskId: string }> }>('/api/runs')]).then(([, r]) => {
+          if (idRef.current === id) setData((cur) => cur ? { ...cur, active: r.active.some((a) => a.taskId === id) } : cur);
+        }).catch((err) => { if (idRef.current === id) setError(err as Error); });
+        return;
+      }
+      if (d.visibility === 'internal') return;
       const taskId = d.taskId ?? d.task_id ?? d.id;
       if (e.type === 'run.delta' && d.taskId === id) {
-        setLive((cur) => {
-          const prev = cur[d.runId] ?? { text: '', thinking: '' };
-          if (d.kind === 'reset') return { ...cur, [d.runId]: { text: '', thinking: prev.thinking } };
-          const key = d.kind === 'thinking' ? 'thinking' : 'text';
-          return { ...cur, [d.runId]: { ...prev, [key]: d.replace ? d.text ?? '' : prev[key] + (d.text ?? '') } };
-        });
+        if (completed.current.has(d.runId)) return;
+        const prev = pending.current[d.runId] ?? { text: '', thinking: '' };
+        const key = d.kind === 'thinking' ? 'thinking' : 'text';
+        pending.current[d.runId] = d.kind === 'reset' ? { ...prev, text: '' } : { ...prev, [key]: d.replace ? d.text ?? '' : prev[key] + (d.text ?? '') };
+        if (frame.current === null) frame.current = window.requestAnimationFrame(() => { frame.current = null; setLive({ ...pending.current }); });
         return;
       }
       if (e.type === 'run.event' && d.taskId === id) {
@@ -152,16 +215,23 @@ export function useConversation(id: string | null) {
         });
         // A finished message replaces the streamed text/thinking it came from.
         if (ev.kind === 'message') {
-          setLive((cur) => {
-            const prev = cur[ev.run_id];
-            if (!prev) return cur;
-            return { ...cur, [ev.run_id]: ev.payload.role === 'reasoning' ? { ...prev, thinking: '' } : { ...prev, text: '' } };
-          });
+          const prev = pending.current[ev.run_id];
+          if (prev) {
+            pending.current[ev.run_id] = ev.payload.role === 'reasoning' ? { ...prev, thinking: '' } : { ...prev, text: '' };
+            setLive({ ...pending.current });
+          }
         }
         if (!data?.runs.some((r) => r.id === ev.run_id)) soon();
         return;
       }
-      if ((e.type === 'run.started' || e.type === 'run.finished') && taskId === id) soon();
+      if (e.type === 'run.finished' && taskId === id) {
+        const runId = d.id ?? d.runId;
+        completed.current.add(runId);
+        setData((cur) => cur ? { ...cur, runs: cur.runs.map((r) => r.id === runId ? { ...r, ...d, events: r.events } : r) } : cur);
+        delete pending.current[runId];
+        setLive({ ...pending.current });
+        soon();
+      } else if (e.type === 'run.started' && taskId === id) soon();
       else if ((e.type === 'task.updated' || e.type.startsWith('approval.')) && (taskId === id || d.task_id === id)) soon();
     });
   }, [id, data?.runs.length]);

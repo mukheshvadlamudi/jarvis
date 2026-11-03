@@ -30,13 +30,23 @@ async function loadFactory(): Promise<CodexFactory> {
   return (options) => new sdk.Codex(options);
 }
 
+export const JARVIS_APPROVED_TOOLS = ['search_memory', 'search_conversations', 'read_note', 'list_projects', 'get_usage', 'save_memory', 'request_approval', 'consult_agent', 'handoff_to_agent', 'create_task'];
+
 /** SDK options for one run. MCP servers go in as `--config mcp_servers.*` overrides. Exported for tests. */
 export function buildCodexOptions(input: RunInput, env: NodeJS.ProcessEnv): { codex: CodexOptions; thread: ThreadOptions } {
   const config: NonNullable<CodexOptions['config']> = {};
   const servers = Object.entries(input.mcpServers ?? {});
   if (servers.length) {
-    const mcp: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {};
-    for (const [name, spec] of servers) mcp[name] = { command: spec.command, args: spec.args, env: spec.env };
+    const mcp: NonNullable<CodexOptions['config']> = {};
+    for (const [name, spec] of servers) {
+      mcp[name] = { command: spec.command, args: spec.args, env: sanitizedAgentEnv(spec.env),
+        ...(name === 'jarvis' ? {
+          enabled_tools: JARVIS_APPROVED_TOOLS,
+          default_tools_approval_mode: 'prompt',
+          tools: Object.fromEntries(JARVIS_APPROVED_TOOLS.map((tool) => [tool, { approval_mode: 'approve' }])),
+        } : {}),
+      };
+    }
     config.mcp_servers = mcp;
   }
   const thread: ThreadOptions = {

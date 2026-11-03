@@ -47,8 +47,13 @@ try {
   const extra = JSON.parse(process.env.SHOT_PAGES ?? '[]');
   let pages = [
     { name: 'ask', path: '/' },
-    { name: 'ask-conversation', path: '/c/t_demo_auth' },
+    { name: 'ask-conversation', path: '/c/t_demo_auth', action: () => { document.querySelector('.ask-thread').scrollTop = 0; } },
     { name: 'ask-work', path: '/c/t_demo_auth', action: () => { document.querySelector('.ask-thread').scrollTop = 0; }, click: '.work-toggle >> nth=0' },
+    { name: 'ask-history', path: '/c/t_demo_auth', click: 'button[aria-label="History"]' },
+    { name: 'ask-agents', path: '/c/t_demo_auth', click: 'button[aria-label="Agents"]' },
+    { name: 'ask-rich', path: '/c/t_demo_backups', diagram: true, action: () => { document.querySelector('.table-wrap').scrollIntoView({ block: 'start' }); } },
+    { name: 'ask-code', path: '/c/t_demo_backups', diagram: true, action: () => { document.querySelector('.code-block').scrollIntoView({ block: 'end' }); } },
+    { name: 'ask-options', path: '/', click: 'button[aria-label="Answer options"]' },
     { name: 'home', path: '/overview' },
     { name: 'connectors', path: '/connectors' },
     { name: 'board', path: '/board' },
@@ -56,7 +61,7 @@ try {
     { name: 'approvals', path: '/approvals' },
     { name: 'usage', path: '/usage' },
     { name: 'settings', path: '/settings' },
-    ...(await import(join(root, 'web/scripts/pages.mjs')).then((m) => m.pages(json, base)).catch(() => [])),
+    ...(only?.every((p) => p.startsWith('ask')) ? [] : await import(join(root, 'web/scripts/pages.mjs')).then((m) => m.pages(json, base)).catch(() => [])),
     ...extra,
   ];
   if (only) pages = pages.filter((p) => only.includes(p.path) || only.includes(p.name));
@@ -70,7 +75,7 @@ try {
   for (const theme of ['dark', 'light']) {
     for (const vp of viewports) {
       const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, colorScheme: theme, deviceScaleFactor: vp.mobile ? 2 : 1, isMobile: vp.mobile, hasTouch: vp.mobile });
-      await ctx.addInitScript((t) => localStorage.setItem('jarvis.theme', t), theme);
+      await ctx.addInitScript((t) => { if (window === window.top) localStorage.setItem('jarvis.theme', t); }, theme);
       for (const p of pages) {
         const page = await ctx.newPage();
         const errors = [];
@@ -78,9 +83,10 @@ try {
         page.on('pageerror', (e) => errors.push(String(e)));
         await page.goto(base + p.path, { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(p.wait ?? 1400);
-        if (p.action) await page.evaluate(p.action).catch(() => undefined);
+        if (p.diagram) await page.frameLocator('iframe[title="Answer diagram"]').locator('svg').waitFor({ timeout: 20_000 });
+        if (p.action) await page.evaluate(p.action);
         if (p.click) {
-          await page.click(p.click).catch(() => undefined);
+          await page.click(p.click);
           await page.waitForTimeout(500);
         }
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

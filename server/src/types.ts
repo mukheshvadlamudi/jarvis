@@ -38,7 +38,14 @@ export interface Task {
   mode: TaskMode;
 }
 
+export type RunPurpose = 'user_reply' | 'both' | 'second_opinion' | 'consult' | 'learning' | 'handoff' | 'maintenance' | 'verify';
+export type RunVisibility = 'conversation' | 'activity' | 'internal';
+
 export interface Run {
+  purpose: RunPurpose | null;
+  visibility: RunVisibility | null;
+  owner_text: string | null;
+  parent_run_id: string | null;
   id: string;
   task_id: string;
   agent: string;

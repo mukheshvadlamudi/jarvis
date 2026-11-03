@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseUtterance, stripWake } from './intents.ts';
-import { answerToSpeech, sentences, toSpeech } from './speech.ts';
+import { answerToSpeech, sentences, synthesisChunks, toSpeech } from './speech.ts';
 
 describe('speech text', () => {
   it('keeps decimals, filenames and long unbroken sentences together', () => {
@@ -51,5 +51,23 @@ describe('voice intents', () => {
     expect(parseUtterance('read the result', open).kind).toBe('result');
     expect(parseUtterance('[BLANK_AUDIO]', open).kind).toBe('ignore');
     expect(parseUtterance('Could you draft a reply to Sam about the launch date?', open)).toEqual({ kind: 'task', text: 'draft a reply to Sam about the launch date' });
+  });
+});
+
+describe('bounded natural synthesis', () => {
+  it('keeps the opening sentence independent and uses clause boundaries', () => {
+    expect(synthesisChunks('Backups are ready. Everything has been saved safely.')[0]).toBe('Backups are ready.');
+    const text = 'This is a longer opening clause, followed by a clear explanation of how to recover all the files without losing the saved notes.';
+    expect(synthesisChunks(text)[0]).toBe('This is a longer opening clause,');
+  });
+  it('bounds long and unpunctuated text without dropping words', () => {
+    const text = 'Saved '.repeat(100).trim();
+    const chunks = synthesisChunks(text);
+    expect(chunks.every((chunk) => chunk.length <= 180)).toBe(true);
+    expect(chunks.join(' ')).toBe(text);
+    expect(synthesisChunks('x'.repeat(1000)).every((chunk) => chunk.length <= 180)).toBe(true);
+  });
+  it('speaks units, percentages and currency without Markdown', () => {
+    expect(answerToSpeech('**Saved 2 GB.** Used 25% of the disk. Cost $12.50. More detail.')).toBe('Saved 2 gigabytes. Used 25 percent of the disk. Cost 12.50 dollars.');
   });
 });

@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import type { Db } from '../db/index.ts';
-import { all, get, run } from '../db/index.ts';
+import { all, get, getSetting, run, setSetting } from '../db/index.ts';
 import type { EventBus } from '../events.ts';
 import { newId, nowIso } from '../util/ids.ts';
 import { unifiedDiff } from './diff.ts';
+import { appendFact, factKey, factLine, factsIn, isCurrent, mapFacts, today } from './facts.ts';
+import type { Fact } from './facts.ts';
 import type { VaultIndex } from './vault.ts';
 
 export interface MemoryProposal {
@@ -23,12 +25,36 @@ export interface MemoryProposal {
   error: string | null;
 }
 
+export interface FactInput {
+  subject: string;
+  predicate: string;
+  value: string;
+  op: 'add' | 'update' | 'retract' | 'noop';
+  source: string;
+  validFrom?: string;
+  target?: string;
+  runId?: string | null;
+}
+
+export interface FactResult {
+  status: MemoryProposal['status'] | 'noop';
+  target_path: string;
+  id?: string;
+}
+
 const hash = (s: string) => createHash('sha1').update(s).digest('hex');
+
+/** Vault-relative path, normalised and lowercased, so './CORE.md' or 'core.md' can't skip the policy. */
+export function policyKey(target: string): string {
+  const t = posix.normalize(target.trim().replace(/\\/g, '/') || '.');
+  return t.replace(/^(?:\.\/|\/)+/, '').toLowerCase();
+}
 
 /** Notes whose edits always need the owner's approval. */
 export function needsApproval(target: string, mode: 'append' | 'replace'): boolean {
-  if (target === 'CORE.md' || /^(Projects|People|Areas)\//.test(target)) return true;
-  return mode === 'replace' && !target.startsWith('Research/');
+  const t = policyKey(target);
+  if (t === 'core.md' || /^(projects|people|areas)\//.test(t)) return true;
+  return mode === 'replace' && !t.startsWith('research/');
 }
 
 function localDate(d = new Date()): string {
@@ -54,12 +80,41 @@ export class MemoryProposals {
   }
 
   normalizeTarget(target: string): string {
-    let t = target.trim().replace(/\\/g, '/').replace(/^\/+/, '');
-    if (!t) t = 'Inbox.md';
+    let t = posix.normalize(target.trim().replace(/\\/g, '/') || '.').replace(/^(?:\.\/|\/)+/, '');
+    if (!t || t === '.') t = 'Inbox.md';
     if (!t.toLowerCase().endsWith('.md')) t += '.md';
-    if (t.startsWith('Skills/')) throw new Error('Skills are changed through skill proposals, not save_memory');
+    if (t.toLowerCase().startsWith('skills/')) throw new Error('Skills are changed through skill proposals, not save_memory');
     this.vault.resolve(t); // throws if it escapes the vault
     return t;
+  }
+
+  proposeFact(input: FactInput): FactResult {
+    for (const key of ['subject', 'predicate', 'value', 'source'] as const) {
+      if (typeof input[key] !== 'string' || (key !== 'value' && !input[key].trim())) throw new Error(`fact ${key} is required`);
+    }
+    if (!['add', 'update', 'retract', 'noop'].includes(input.op)) throw new Error('invalid fact operation');
+    if ((input.op === 'add' || input.op === 'update') && !input.value.trim()) throw new Error('fact value is required');
+    if (input.validFrom && (!/^\d{4}-\d{2}-\d{2}$/.test(input.validFrom) || new Date(input.validFrom).toISOString().slice(0, 10) !== input.validFrom)) throw new Error('invalid validFrom date');
+    const sameKey = (f: Fact) => factKey(f.subject) === factKey(input.subject) && factKey(f.predicate) === factKey(input.predicate);
+    const existing = this.vault.list().flatMap((n) => factsIn(this.current(n.path)).filter((f) => sameKey(f) && isCurrent(f)).map((fact) => ({ target: n.path, fact })));
+    if (existing.length > 1) throw new Error('Multiple current facts share this subject and predicate; review them before updating.');
+    const old = existing[0];
+    const target = old?.target ?? this.normalizeTarget(input.target ?? 'Inbox.md');
+    if (input.op === 'noop' || (!old && input.op === 'retract') || (old && old.fact.value === input.value.trim() && input.op !== 'retract')) return { status: 'noop', target_path: target };
+    // An add for an existing key is a correction, never a second competing current value.
+    const fingerprint = hash(JSON.stringify([factKey(input.subject), factKey(input.predicate), input.value.trim(), input.op === 'retract' ? 'retract' : 'set']));
+    const stored = getSetting<string | null>(this.db, `memory.fact.${fingerprint}`, null);
+    const previous = stored ? this.get(stored) : undefined;
+    if (previous && (previous.status === 'pending' || previous.status === 'rejected')) return previous;
+    let content = this.current(target);
+    if (old) content = mapFacts(content, (f, line) => f.id === old.fact.id ? factLine({ ...f, validTo: today() }) : line);
+    if (input.op !== 'retract') content = appendFact(content, {
+      id: newId('fact'), subject: input.subject.trim(), predicate: input.predicate.trim(), value: input.value.trim(),
+      validFrom: input.validFrom ?? null, validTo: null, source: input.source.trim(), supersedes: old?.fact.id ?? null,
+    });
+    const p = this.propose({ target, content, mode: 'replace', reason: `Fact ${input.op}: ${input.subject} / ${input.predicate} (source: ${input.source})`, runId: input.runId });
+    setSetting(this.db, `memory.fact.${fingerprint}`, p.id);
+    return p;
   }
 
   private current(target: string): string {

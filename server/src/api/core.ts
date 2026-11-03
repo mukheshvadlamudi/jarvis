@@ -25,6 +25,8 @@ function withDetail(rows: Array<Record<string, unknown>>, s: Services) {
   return rows.map((a) => ({ ...a, detail: JSON.parse(String(a.detail_json ?? '{}')), live: s.approvals.hasWaiter(String(a.id)) }));
 }
 
+let streamEpoch = Date.now();
+
 export function registerCoreRoutes(app: Hono, s: Services): void {
   const started = Date.now();
 
@@ -42,10 +44,12 @@ export function registerCoreRoutes(app: Hono, s: Services): void {
 
   app.get('/api/stream', (c) =>
     streamSSE(c, async (stream) => {
+      const epoch = ++streamEpoch;
       let id = 0;
       const queue: Array<{ type: string; data: unknown }> = [];
       let wake: (() => void) | null = null;
       const unsubscribe = s.bus.subscribe((e) => {
+        if (e.type.startsWith('run.') && (e.data as { visibility?: string } | null)?.visibility === 'internal') return;
         if (queue.length > 500) queue.shift(); // slow client: drop oldest rather than grow unbounded
         queue.push(e);
         wake?.();
@@ -54,7 +58,7 @@ export function registerCoreRoutes(app: Hono, s: Services): void {
         unsubscribe();
         wake?.();
       });
-      await stream.writeSSE({ event: 'hello', data: JSON.stringify({ ts: nowIso(), counts: s.tasks.counts(), approvals: s.approvals.pendingCount() }), id: String(id++) });
+      await stream.writeSSE({ event: 'hello', data: JSON.stringify({ epoch, active: s.orchestrator.activeRuns().filter((r) => r.visibility !== 'internal'), ts: nowIso(), counts: s.tasks.counts(), approvals: s.approvals.pendingCount() }), id: String(id++) });
       while (!stream.aborted) {
         if (!queue.length) {
           await Promise.race([new Promise<void>((r) => (wake = r)), stream.sleep(25_000)]);

@@ -25,7 +25,7 @@ export function VoiceToggle({ compact }: { compact?: boolean }) {
       title={on ? 'Turn hands-free voice off' : 'Turn hands-free voice on (Kokoro + Whisper, runs on this device)'}
       onClick={() => void (on ? voice.stop() : voice.start())}
     >
-      {on ? <Mic size={14} strokeWidth={1.5} /> : <MicOff size={14} strokeWidth={1.5} />}
+      {on ? <Mic size={16} strokeWidth={1.5} /> : <MicOff size={16} strokeWidth={1.5} />}
       {on ? 'Voice on' : 'Voice off'}
     </button>
   );
@@ -71,7 +71,7 @@ export function VoiceDock() {
       <Ring status={v.status} level={v.level} />
       <div className="voice-text" style={{ flex: '1 1 160px', minWidth: 0 }}>
         <span className="voice-state">
-          {LABEL[v.status]}
+          {v.muted ? 'Mic muted' : LABEL[v.status]}
         </span>
         {v.needsGesture || v.status === 'error' ? <span className="voice-hint" style={{ whiteSpace: 'normal' }}>{hint}</span> : null}
         {v.outcome || v.heard ? <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', maxHeight: 120, overflowY: 'auto' }}>{v.ignored ? v.outcome : [v.heard ? 'Heard: ' + v.heard : '', v.outcome].filter(Boolean).join(' \u00b7 ')}</span> : hint ? <span className="voice-hint" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{hint}</span> : null}
@@ -82,16 +82,20 @@ export function VoiceDock() {
         {v.ignored ? <button className="btn ghost sm" style={{ alignSelf: 'flex-start', minHeight: 44 }} onClick={() => void voice.useHeard()}>Use it</button> : null}
       </div>
       {v.status === 'speaking' ? (
-        <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label="Stop speaking" title="Stop speaking (or just start talking)" onClick={() => voice.stopSpeaking()}>
-          <Square size={14} strokeWidth={1.5} />
+        <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label="Stop speaking" title="Stop speaking (Space)" onClick={() => voice.stopSpeaking()}>
+          <Square size={16} strokeWidth={1.5} />
         </button>
       ) : (
         <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label="Test voice" title="Say something" onClick={() => void voice.speak('Systems online. Say Jarvis, then what you need.')}>
-          <Volume2 size={14} strokeWidth={1.5} />
+          <Volume2 size={16} strokeWidth={1.5} />
         </button>
       )}
+      <button className="btn ghost sm" style={{ minHeight: 44 }} onClick={() => voice.onStopAgent?.()} title="Stop the current agent run">Stop agent</button>
+      <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label={v.muted ? 'Unmute mic' : 'Mute mic'} aria-pressed={v.muted} onClick={() => voice.muteMic()}>
+        {v.muted ? <MicOff size={16} strokeWidth={1.5} /> : <Mic size={16} strokeWidth={1.5} />}
+      </button>
       <button className="btn ghost icon sm" style={{ minWidth: 44, minHeight: 44 }} aria-label="Turn voice off" title="Turn voice off" onClick={() => void voice.stop()}>
-        <MicOff size={14} strokeWidth={1.5} />
+        <MicOff size={16} strokeWidth={1.5} />
       </button>
     </div>
   );

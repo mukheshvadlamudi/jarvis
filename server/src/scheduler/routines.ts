@@ -1,6 +1,6 @@
 import type { Services } from '../app.ts';
 import { all } from '../db/index.ts';
-import { CONSOLIDATION_PROMPT } from '../memory/maintenance.ts';
+import { CONSOLIDATION_PROMPT, nextConsolidationBatch } from '../memory/maintenance.ts';
 import type { AgentPref, Task, TaskType } from '../types.ts';
 
 export interface TaskTemplate {
@@ -119,9 +119,14 @@ export function routineBody(s: Services, routine: TaskTemplate['routine'], now =
       lines.push('Finish with: wins, what slipped, and the top three priorities for next week.');
       break;
     }
-    case 'memory_consolidation':
+    case 'memory_consolidation': {
       lines.push(CONSOLIDATION_PROMPT);
+      const batch = nextConsolidationBatch(s.db);
+      lines.push(batch.paths.length
+        ? `Changed-note batch (review only these):\n${batch.paths.map((p) => `- ${p}`).join('\n')}${batch.remaining ? '\nMore notes remain; they come in the next run.' : ''}`
+        : 'Changed-note batch: none. Nothing changed since the last consolidation; reply with one line saying so and stop.');
       break;
+    }
     case 'updates_digest': {
       let unseen: Array<{ title: string; url: string; source: string }> = [];
       try {

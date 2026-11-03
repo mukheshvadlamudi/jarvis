@@ -7,7 +7,7 @@ import { decide } from '../router/index.ts';
 import type { RunnerRegistry } from '../runners/index.ts';
 import { activityLine } from '../runners/activity.ts';
 import type { McpServerSpec, NormalizedEvent, RunEventSink, RunHandle, RunInput, RunResult } from '../runners/types.ts';
-import type { AgentId, Approval, Attachment, Effort, Project, Run, StoredRunEvent, Task } from '../types.ts';
+import type { AgentId, Approval, Attachment, Effort, Project, Run, RunPurpose, RunVisibility, StoredRunEvent, Task } from '../types.ts';
 import type { UsageMeter } from '../usage/meter.ts';
 import { newId, nowIso } from '../util/ids.ts';
 import { logger } from '../util/log.ts';
@@ -33,6 +33,7 @@ export interface AskOptions {
 
 interface StartOptions extends AskOptions {
   prompt: string;
+  ownerText?: string;
   resumeSessionId?: string;
   /** Overrides the route reason shown on the run. */
   reason?: string;
@@ -74,6 +75,7 @@ interface Active {
   runId: string;
   handle: RunHandle;
   agent: AgentId;
+  visibility: RunVisibility;
 }
 
 /**
@@ -116,15 +118,15 @@ export class Orchestrator {
   }
 
   activeCount(): number {
-    return this.active.size + this.starting.size;
+    return this.active.size + [...this.starting].filter((id) => !this.active.has(id)).length;
   }
 
-  isActive(taskId: string): boolean {
-    return this.active.has(taskId) || this.starting.has(taskId);
+  isActive(taskId: string, includeInternal = true): boolean {
+    return [...this.active.values()].some((a) => a.taskId === taskId && (includeInternal || a.visibility !== 'internal')) || this.starting.has(taskId);
   }
 
-  activeRuns(): Array<{ taskId: string; runId: string; agent: AgentId }> {
-    return [...this.active.values()].map(({ taskId, runId, agent }) => ({ taskId, runId, agent }));
+  activeRuns(): Array<{ taskId: string; runId: string; agent: AgentId; visibility: RunVisibility }> {
+    return [...this.active.values()].map(({ taskId, runId, agent, visibility }) => ({ taskId, runId, agent, visibility }));
   }
 
   stop(): void {
@@ -146,7 +148,7 @@ export class Orchestrator {
     if (this.stopped) return;
     const max = this.d.config.get().maxConcurrentRuns;
     while (this.activeCount() < max) {
-      const next = this.d.tasks.nextQueued([...this.active.keys(), ...this.starting]);
+      const next = this.d.tasks.nextQueued([...this.active.values()].map((a) => a.taskId).concat([...this.starting]));
       if (!next) break;
       this.starting.add(next.id);
       void this.startRun(next, { prompt: this.promptFor(next) }).finally(() => this.starting.delete(next.id));
@@ -179,10 +181,13 @@ export class Orchestrator {
   }
 
   async cancel(taskId: string): Promise<Task> {
-    const a = this.active.get(taskId);
-    if (a) {
-      await a.handle.cancel();
-      this.d.approvals.abandonRun(a.runId, 'Run cancelled');
+    const live = [...this.active.values()].filter((a) => a.taskId === taskId);
+    if (live.length) {
+      await Promise.all(live.map(async (a) => {
+        const cancellation = a.handle.cancel();
+        this.d.approvals.abandonRun(a.runId, 'Run cancelled');
+        await cancellation;
+      }));
       return this.d.tasks.get(taskId)!;
     }
     const t = this.d.tasks.get(taskId);
@@ -222,6 +227,7 @@ export class Orchestrator {
     try {
       const runId = await this.startRun(this.d.tasks.get(taskId)!, {
         prompt: text,
+        ownerText: text,
         resumeSessionId: last?.session_id ?? undefined,
         agent: (last?.agent as AgentId) ?? undefined,
       });
@@ -235,8 +241,8 @@ export class Orchestrator {
   private lastRun(taskId: string): Run | undefined {
     return get<Run>(
       this.d.db,
-      `SELECT * FROM runs WHERE task_id = ? AND (route_reason IS NULL OR (route_reason NOT LIKE 'side:%' AND route_reason NOT LIKE 'consult:%' AND route_reason NOT LIKE 'learning%'))
-       ORDER BY started_at DESC LIMIT 1`,
+      `SELECT * FROM runs WHERE task_id = ? AND purpose IN ('user_reply', 'handoff') AND visibility = 'conversation'
+       ORDER BY started_at DESC, rowid DESC LIMIT 1`,
       taskId,
     );
   }
@@ -247,17 +253,19 @@ export class Orchestrator {
    * fresh session that is handed the conversation so far.
    */
   async ask(taskId: string, text: string, opts: AskOptions = {}): Promise<{ mode: 'resumed'; runId?: string }> {
-    if (this.isActive(taskId)) throw new Error('Jarvis is still answering the last message; wait for it or stop it');
+    if (this.isActive(taskId, false)) throw new Error('Jarvis is still answering the last message; wait for it or stop it');
     const t = this.d.tasks.get(taskId);
     if (!t) throw new Error('not_found');
     const last = this.lastRun(taskId);
     const agent = opts.agent ?? (last?.agent as AgentId | undefined);
-    const same = !!last && last.agent === agent && !!last.session_id;
+    const contaminated = last?.session_id && get(this.d.db, "SELECT id FROM runs WHERE task_id = ? AND session_id = ? AND visibility = 'internal' LIMIT 1", taskId, last.session_id);
+    const same = !!last && last.agent === agent && !!last.session_id && !contaminated;
     if (t.status !== 'queued') this.d.tasks.setStatus(taskId, 'queued', { not_before: null });
     this.starting.add(taskId);
     try {
       const runId = await this.startRun(this.d.tasks.get(taskId)!, {
         ...opts,
+        ownerText: text,
         agent,
         prompt: same || !last ? text : `${this.history(taskId)}${NEW_MESSAGE}${text}`,
         resumeSessionId: same ? last!.session_id! : undefined,
@@ -271,15 +279,15 @@ export class Orchestrator {
 
   /** The conversation so far as plain text, for an agent joining it (newest kept when long). */
   history(taskId: string): string {
-    const runs = all<Run>(this.d.db, "SELECT * FROM runs WHERE task_id = ? AND status = 'done' ORDER BY started_at", taskId);
+    const runs = all<Run>(this.d.db, "SELECT * FROM runs WHERE task_id = ? AND status = 'done' AND visibility = 'conversation' AND purpose IN ('user_reply', 'both', 'second_opinion', 'handoff') ORDER BY started_at, rowid", taskId);
     const who = (r: Run) => {
       const name = r.agent === 'claude' ? 'Claude' : r.agent === 'codex' ? 'Codex' : r.agent;
-      return r.route_reason?.startsWith('side:') ? `${name} (${r.route_reason.slice(5).split(':')[0]})` : name;
+      return r.purpose === 'both' || r.purpose === 'second_opinion' ? `${name} (${r.purpose})` : name;
     };
     const turns: string[] = [];
     for (const r of runs) {
-      const asked = (r.prompt ?? '').split(NEW_MESSAGE).pop()!.trim();
-      if (asked && !r.route_reason?.startsWith('side:')) turns.push(`Owner: ${asked}`);
+      const asked = r.owner_text;
+      if (asked && r.purpose === 'user_reply') turns.push(`Owner: ${asked}`);
       if (r.answer) turns.push(`${who(r)}: ${r.answer}`);
     }
     let text = turns.join('\n\n');
@@ -352,12 +360,17 @@ export class Orchestrator {
     const attachments = this.attach(opts.attachments, workdir.cwd);
     const effort = opts.effort ?? task.effort;
     const model = opts.model && opts.model !== 'default' ? opts.model : cfg.agents[agent].model || undefined;
+    const maintenance = task.schedule_id && get(this.d.db, "SELECT id FROM schedules WHERE id = ? AND (built_in = 'memory_consolidation' OR json_extract(task_template_json, '$.routine') = 'memory_consolidation')", task.schedule_id);
+    const purpose: RunPurpose = task.handoff_json ? 'handoff' : maintenance ? 'maintenance' : 'user_reply';
+    const visibility: RunVisibility = purpose === 'maintenance' ? 'internal' : 'conversation';
     run(
       this.d.db,
-      `INSERT INTO runs (id, task_id, agent, cwd, started_at, status, context_report_json, route_reason, prompt, model, effort, attachments_json)
-       VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO runs (id, task_id, agent, cwd, started_at, status, context_report_json, route_reason, prompt, model, effort, attachments_json, purpose, visibility, owner_text, parent_run_id)
+       VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       runId, task.id, agent, workdir.cwd, startedAt, JSON.stringify(ctx.report), reason, opts.prompt, model ?? null, effort,
       attachments.length ? JSON.stringify(attachments) : null,
+      purpose, visibility, purpose === 'user_reply' ? opts.ownerText ?? opts.prompt : null,
+      task.handoff_json ? (JSON.parse(task.handoff_json) as { fromRun: string }).fromRun : null,
     );
     this.d.tasks.setStatus(task.id, 'running', { agent, route_reason: reason, not_before: null });
     this.d.bus.publish('run.started', this.getRun(runId));
@@ -385,7 +398,7 @@ export class Orchestrator {
     for (const h of this.inputHooks) h(task, input);
 
     const handle = this.d.runners.get(agent).start(input, sink);
-    this.active.set(task.id, { taskId: task.id, runId, handle, agent });
+    this.active.set(task.id, { taskId: task.id, runId, handle, agent, visibility });
     void handle.done
       .then((result) => this.finish(task.id, runId, result, workdir))
       .catch((err) => this.finish(task.id, runId, { status: 'failed', summary: String(err), error: String(err), usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0 }, toolCalls: 0 }, workdir));
@@ -393,22 +406,28 @@ export class Orchestrator {
   }
 
   /**
-   * A small follow-on run in an existing session that does not change the task's status (used by
-   * the learning loop). Recorded as a run so its plan usage is visible. Approvals are refused.
+   * A tracked side run that leaves the task status alone. Parallel conversation answers start
+   * immediately; consults and internal work require a free slot. Approvals are refused.
    */
   async sideRun(
     taskId: string,
-    opts: { agent: AgentId; prompt: string; resumeSessionId: string | null; cwd: string; label: string; model?: string; effort?: Effort; contextPrefix?: string; webSearch?: boolean; attachments?: Attachment[] },
+    opts: { agent: AgentId; prompt: string; resumeSessionId: string | null; cwd: string; label: string; purpose: RunPurpose; parentRunId: string | null; model?: string; effort?: Effort; contextPrefix?: string; webSearch?: boolean; attachments?: Attachment[] },
   ): Promise<RunResult> {
     const task = this.d.tasks.get(taskId);
     if (!task) throw new Error('not_found');
     const cfg = this.d.config.get();
+    if (this.stopped) throw new Error('Jarvis is shutting down');
+    // Reject promptly instead of waiting for the slot the parent is holding.
+    if (!['both', 'second_opinion'].includes(opts.purpose) && this.activeCount() >= cfg.maxConcurrentRuns) {
+      return { status: 'failed', summary: 'Side run unavailable: all agent slots are busy. Continue on your own.', error: 'All agent slots are busy', usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0 }, toolCalls: 0 };
+    }
+    const visibility: RunVisibility = opts.purpose === 'consult' ? 'activity' : ['learning', 'maintenance', 'verify'].includes(opts.purpose) ? 'internal' : 'conversation';
     const runId = newId('r');
     const model = opts.model && opts.model !== 'default' ? opts.model : cfg.agents[opts.agent].model || undefined;
     run(
       this.d.db,
-      `INSERT INTO runs (id, task_id, agent, cwd, started_at, status, route_reason, prompt, model, effort, attachments_json) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)`,
-      runId, taskId, opts.agent, opts.cwd, nowIso(), opts.label, opts.prompt, model ?? null, opts.effort ?? null, opts.attachments?.length ? JSON.stringify(opts.attachments) : null,
+      `INSERT INTO runs (id, task_id, agent, cwd, started_at, status, route_reason, prompt, model, effort, attachments_json, purpose, visibility, owner_text, parent_run_id) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+      runId, taskId, opts.agent, opts.cwd, nowIso(), opts.label, opts.prompt, model ?? null, opts.effort ?? null, opts.attachments?.length ? JSON.stringify(opts.attachments) : null, opts.purpose, visibility, opts.parentRunId,
     );
     this.d.bus.publish('run.started', this.getRun(runId));
     const base = this.makeSink(taskId, runId, opts.agent, true);
@@ -423,7 +442,9 @@ export class Orchestrator {
       },
       base,
     );
+    this.active.set(runId, { taskId, runId, agent: opts.agent, handle, visibility });
     const result: RunResult = await handle.done.catch((err): RunResult => ({ status: 'failed' as const, summary: String(err), error: String(err), usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0 }, toolCalls: 0 }));
+    this.active.delete(runId);
     if (this.d.db.isOpen) {
       run(
         this.d.db,
@@ -433,6 +454,7 @@ export class Orchestrator {
       );
       this.d.bus.publish('run.finished', this.getRun(runId));
     }
+    this.tick();
     return result;
   }
 
@@ -447,7 +469,7 @@ export class Orchestrator {
     const r = run(this.d.db, 'INSERT INTO run_events (run_id, ts, kind, payload_json) VALUES (?, ?, ?, ?)', runId, ts, e.kind, JSON.stringify(payload));
     const stored: StoredRunEvent = { id: r.lastInsertRowid, run_id: runId, ts, kind: e.kind, payload_json: JSON.stringify(payload) };
     if (e.kind === 'tool_call') run(this.d.db, 'UPDATE runs SET tool_calls = tool_calls + 1 WHERE id = ?', runId);
-    this.d.bus.publish('run.event', { taskId, ...stored, payload });
+    this.d.bus.publish('run.event', { taskId, ...stored, payload, visibility: this.getRun(runId)?.visibility });
   }
 
   private makeSink(taskId: string, runId: string, agent: AgentId, side = false): RunEventSink {
@@ -458,12 +480,12 @@ export class Orchestrator {
         run(this.d.db, 'UPDATE runs SET session_id = ? WHERE id = ?', id, runId);
       },
       requestApproval: async (req) => {
-        if (side) return { approved: false, status: 'rejected', note: 'Not allowed during a learning step' };
+        if (side) return { approved: false, status: 'rejected', note: 'Approvals are not allowed during a read-only side run' };
         const { approval, decision } = this.d.approvals.request({ runId, taskId, ...req, detail: { ...req.detail, agent, runId } });
         pendingApprovals++;
         const t = this.d.tasks.get(taskId);
         if (t?.status === 'running') this.d.tasks.setStatus(taskId, 'needs_you');
-        this.d.bus.publish('run.event', { taskId, run_id: runId, kind: 'status', payload: { status: 'waiting_approval', approvalId: approval.id, summary: req.summary } });
+        this.d.bus.publish('run.event', { taskId, run_id: runId, visibility: this.getRun(runId)?.visibility, kind: 'status', payload: { status: 'waiting_approval', approvalId: approval.id, summary: req.summary } });
         const d = await decision;
         pendingApprovals--;
         const cur = this.d.tasks.get(taskId);
@@ -471,7 +493,7 @@ export class Orchestrator {
         return d;
       },
       rateLimit: (reading) => this.d.usage.recordReading(reading),
-      live: (delta) => this.d.bus.publish('run.delta', { taskId, runId, ...delta }),
+      live: (delta) => this.d.bus.publish('run.delta', { taskId, runId, ...delta, visibility: this.getRun(runId)?.visibility }),
     };
   }
 
@@ -502,7 +524,7 @@ export class Orchestrator {
     const finished = this.getRun(runId)!;
     this.d.bus.publish('run.finished', finished);
     const task = this.d.tasks.get(taskId);
-    if (task) {
+    if (task && finished.visibility !== 'internal') {
       for (const h of this.afterRun) {
         try {
           await h({ task, run: finished, result, workdir });

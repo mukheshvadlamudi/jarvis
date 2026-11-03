@@ -5,6 +5,7 @@ import { post } from '../lib/api.ts';
 import { resetsIn } from '../lib/format.ts';
 import type { AgentId, UsageWindow } from '../lib/types.ts';
 import { Link } from './ui.tsx';
+import { toastError } from '../lib/toast.ts';
 
 const STATE_COLOR: Record<AgentStatus['state'], string> = {
   ready: 'var(--success)',
@@ -20,7 +21,7 @@ function Window({ label, w, threshold }: { label: string; w: UsageWindow | null;
     <span className="agent-window" title={w?.resetsAt ? `Resets ${resetsIn(w.resetsAt)}` : pct === null ? 'Not reported yet' : undefined}>
       <span className="agent-window-label">{label}</span>
       <span className={`agent-window-bar${tone}`} aria-hidden>
-        <span style={{ transform: `scaleX(${(pct ?? 0) / 100})` }} />
+        <span style={{ transform: `scaleX(${Math.max(0, Math.min(100, pct ?? 0)) / 100})` }} />
       </span>
       <span className="agent-window-pct">{pct === null ? '–' : `${pct}%`}</span>
     </span>
@@ -52,7 +53,7 @@ export function AgentStrip({ agents, threshold, picked, onPick, onRefreshed }: {
                 <span className="agent-card-name">{a?.label ?? (id === 'claude' ? 'Claude' : 'Codex')}</span>
                 <span className="agent-card-model mono">{model.replace(/ \(recommended\)$/i, '')}</span>
               </span>
-              <span className="agent-card-detail">{a ? (a.state === 'busy' ? `Working on ${a.detail}` : a.detail) : 'Checking…'}</span>
+                <span className="agent-card-detail">{a ? (a.state === 'busy' ? `Working on ${a.detail}` : a.detail) : 'Checking…'}</span>
             </button>
             <span className="agent-card-usage">
               <Window label="5 h" w={a?.usage.five_hour ?? null} threshold={threshold} />
@@ -73,6 +74,8 @@ export function AgentStrip({ agents, threshold, picked, onPick, onRefreshed }: {
           setBusy(true);
           try {
             onRefreshed((await post<{ agents: Record<AgentId, AgentStatus> }>('/api/agents/refresh')).agents);
+          } catch (err) {
+            toastError(err);
           } finally {
             setBusy(false);
           }

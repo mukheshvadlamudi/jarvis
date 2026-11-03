@@ -6,6 +6,8 @@ import { all, get, run, tx } from '../db/index.ts';
 import type { EventBus } from '../events.ts';
 import { estimateTokens } from '../tasks/context.ts';
 import { logger } from '../util/log.ts';
+import { currentFactsText, factsIn } from './facts.ts';
+import type { Fact } from './facts.ts';
 import { asList, firstHeading, parseFrontmatter } from './frontmatter.ts';
 
 const log = logger('vault');
@@ -24,6 +26,9 @@ export interface NoteRow {
 }
 
 export interface SearchHit {
+  match: 'all words' | 'some words';
+  matchedTerms: string[];
+  facts: Fact[];
   path: string;
   title: string;
   type: string | null;
@@ -208,41 +213,46 @@ export class VaultIndex {
     if (this.timer) clearTimeout(this.timer);
   }
 
-  search(q: string, opts: { limit?: number; type?: string } = {}): SearchHit[] {
-    const limit = Math.min(opts.limit ?? 20, 100);
-    const words = q.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
+  search(q: string, opts: { limit?: number; type?: string; history?: boolean } = {}): SearchHit[] {
+    const limit = Math.max(1, Math.min(Math.floor(opts.limit || 20), 100));
+    const history = opts.history ?? /\bhistory\b/i.test(q);
+    const stop = new Set('a an the where what when how do does did is are was were my me i our your to in on of for and or please history'.split(' '));
+    const stem = (w: string) => w.endsWith('ies') ? w.slice(0, -3) + 'y' : w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
+    const terms = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map(stem);
+    const words = [...new Set((q.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => !stop.has(w)).map(stem))].slice(0, 32);
     if (!words.length) return [];
-    if (this.fts) {
-      const match = words.map((w) => `"${w.replace(/"/g, '')}"*`).join(' ');
-      try {
-        return all<SearchHit>(
-          this.db,
-          `SELECT f.path, i.title, i.type, i.tokens, i.updated,
-             snippet(notes_fts, 2, char(1), char(2), '…', 14) AS snippet
-           FROM notes_fts f JOIN notes_index i ON i.path = f.path
-           WHERE notes_fts MATCH ? ${opts.type ? 'AND i.type = ?' : ''}
-           ORDER BY bm25(notes_fts, 0, 8.0, 1.0) LIMIT ?`,
-          match, ...(opts.type ? [opts.type] : []), limit,
-        );
-      } catch (err) {
-        log.debug('fts query failed, using LIKE', err);
+    type Candidate = { path: string; title: string; type: string | null; tokens: number; updated: string | null; body: string; mtime: number };
+    const select = 'SELECT i.path, i.title, i.type, i.tokens, i.updated, i.mtime, b.body FROM notes_index i JOIN notes_body b ON b.path = i.path';
+    const rank = (rows: Candidate[]) => rows.map((r) => {
+      const body = history ? r.body : currentFactsText(r.body);
+      const searchable = body.replace(/^- fact: .*$/gm, (line) => factsIn('## Facts\n' + line).map((f) => [f.subject, f.predicate, f.value, f.source].join(' ')).join(' '));
+      const title = new Set(terms(r.title)), path = new Set(terms(r.path));
+      const allTerms = new Set(terms(r.title + ' ' + r.path + ' ' + searchable));
+      const matchedTerms = words.filter((w) => allTerms.has(w));
+      if (matchedTerms.length < Math.max(1, Math.ceil(words.length / 2))) return null;
+      const first = matchedTerms.map((w) => body.toLowerCase().indexOf(w)).find((i) => i >= 0) ?? 0;
+      const start = Math.max(0, first - 60);
+      let snippet = body.slice(start, start + 240).replace(/\s+/g, ' ');
+      for (const w of matchedTerms) snippet = snippet.replace(new RegExp('(' + w + ')', 'gi'), '\u0001$1\u0002');
+      return { path: r.path, title: r.title, type: r.type, tokens: r.tokens, updated: r.updated,
+        snippet, matchedTerms, match: matchedTerms.length === words.length ? 'all words' as const : 'some words' as const,
+        facts: factsIn(body),
+        score: matchedTerms.length * 100 + matchedTerms.filter((w) => title.has(w)).length * 8 + matchedTerms.filter((w) => path.has(w)).length * 4,
+        mtime: r.mtime };
+    }).filter((r) => r !== null).sort((a, b) => b.score - a.score || b.mtime - a.mtime || a.path.localeCompare(b.path));
+    const query = (operator: 'AND' | 'OR') => {
+      if (this.fts) {
+        try {
+          return all<Candidate>(this.db, select + ' WHERE (i.path IN (SELECT path FROM notes_fts WHERE notes_fts MATCH ?) OR (' + words.map(() => 'lower(i.path) LIKE ?').join(' ' + operator + ' ') + ')) ' + (opts.type ? 'AND i.type = ?' : ''),
+            words.map((w) => '"' + w + '"*').join(' ' + operator + ' '), ...words.map((w) => '%' + w + '%'), ...(opts.type ? [opts.type] : []));
+        } catch (err) { log.debug('fts query failed, using LIKE', err); }
       }
-    }
-    const where = words.map(() => '(lower(i.title) LIKE ? OR lower(b.body) LIKE ?)').join(' AND ');
-    const params = words.flatMap((w) => [`%${w}%`, `%${w}%`]);
-    const rows = all<SearchHit & { body: string }>(
-      this.db,
-      `SELECT i.path, i.title, i.type, i.tokens, i.updated, b.body FROM notes_index i JOIN notes_body b ON b.path = i.path
-       WHERE ${where} ${opts.type ? 'AND i.type = ?' : ''} ORDER BY i.mtime DESC LIMIT ?`,
-      ...params, ...(opts.type ? [opts.type] : []), limit,
-    );
-    return rows.map(({ body, ...r }) => {
-      const w0 = words[0] ?? '';
-      const idx = body.toLowerCase().indexOf(w0);
-      const start = Math.max(0, idx - 60);
-      const raw = body.slice(start, start + 160).replace(/\s+/g, ' ');
-      return { ...r, snippet: `${start > 0 ? '…' : ''}${raw.replace(new RegExp(w0.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), (m) => `\u0001${m}\u0002`)}…` };
-    });
+      return all<Candidate>(this.db, select + ' WHERE (' + words.map(() => "lower(i.title || ' ' || i.path || ' ' || b.body) LIKE ?").join(' ' + operator + ' ') + ') ' + (opts.type ? 'AND i.type = ?' : ''),
+        ...words.map((w) => '%' + w + '%'), ...(opts.type ? [opts.type] : []));
+    };
+    const strict = rank(query('AND')).filter((r) => r.match === 'all words');
+    const hits = strict.length >= Math.min(3, limit) ? strict : rank(query('OR'));
+    return hits.slice(0, limit).map(({ score: _score, mtime: _mtime, ...hit }) => hit);
   }
 
   read(rel: string): Note | null {
