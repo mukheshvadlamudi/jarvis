@@ -46,5 +46,27 @@ async function handle(m: In) {
     post({ type: 'error', what: 'ears', id: 'id' in m ? m.id : null, message: (err as Error).message });
   }
 }
-let queue = Promise.resolve();
-self.onmessage = (e: MessageEvent<In>) => { queue = queue.then(() => handle(e.data)); };
+/**
+ * One Whisper run in flight plus one waiting transcription at most. A newer segment replaces the
+ * waiting one (its request is answered with 'superseded'), so a noisy room can't build a backlog.
+ */
+const pending: In[] = [];
+let busy = false;
+async function pump() {
+  if (busy) return;
+  busy = true;
+  while (pending.length) await handle(pending.shift()!);
+  busy = false;
+}
+self.onmessage = (e: MessageEvent<In>) => {
+  const m = e.data;
+  if (m.type === 'transcribe') {
+    const i = pending.findIndex((p) => p.type === 'transcribe');
+    if (i >= 0) {
+      post({ type: 'superseded', id: (pending[i] as { id: number }).id });
+      pending.splice(i, 1);
+    }
+  }
+  pending.push(m);
+  void pump();
+};
