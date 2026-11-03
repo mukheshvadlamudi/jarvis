@@ -124,4 +124,47 @@ describe('Ask voice controller', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(mocks.voice.speak).toHaveBeenCalledExactlyOnceWith('Backups run daily.');
   });
+
+  describe('follow-up window', () => {
+    beforeEach(() => {
+      mocks.voice.setAwaiting.mockImplementation((a: boolean) => { mocks.voice.state.awaiting = a; });
+    });
+    afterEach(() => { mocks.voice.setAwaiting.mockReset(); mocks.voice.speak.mockReset().mockImplementation(async () => {}); });
+
+    it('accepts a command split off the wake word by a pause, while "Yes?" is still playing', async () => {
+      mocks.voice.speak.mockImplementationOnce(() => new Promise(() => {}));
+      await mocks.voice.onUtterance?.('Jarvis.');
+      expect(mocks.voice.speak).toHaveBeenCalledWith('Yes?');
+      expect(mocks.voice.state.awaiting).toBe(true);
+      mocks.post.mockImplementation(async (url: string) => (url === '/api/tasks/preview' ? { agent: 'claude', type: 'research' } : { task: { id: 't1', title: 'Research backup tools' } }));
+      await mocks.voice.onUtterance?.('research backup tools');
+      expect(mocks.post).toHaveBeenCalledWith('/api/tasks', { title: 'research backup tools' });
+    });
+
+    it('keeps the window open while the owner is still talking', async () => {
+      await mocks.voice.onUtterance?.('Jarvis');
+      mocks.voice.state.status = 'hearing';
+      await vi.advanceTimersByTimeAsync(12_000);
+      expect(mocks.voice.state.awaiting).toBe(true);
+      mocks.voice.state.status = 'listening';
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(mocks.voice.state.awaiting).toBe(false);
+    });
+
+    it('says "On it." for a conversation without opening a window', async () => {
+      await mocks.voice.onUtterance?.('Jarvis, how are backups stored?');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.voice.speak).toHaveBeenCalledWith('On it.');
+      expect(mocks.voice.setAwaiting).not.toHaveBeenCalledWith(true);
+      expect(mocks.post).toHaveBeenCalledWith('/api/conversations', { text: 'how are backups stored?' });
+    });
+
+    it('keeps announcing after one announcement fails', async () => {
+      mocks.voice.speak.mockRejectedValueOnce(new Error('audio device lost'));
+      await emit('notify', { message: 'First' });
+      await emit('notify', { message: 'Second' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.voice.speak).toHaveBeenLastCalledWith('Second');
+    });
+  });
 });

@@ -8,6 +8,8 @@ import { isNoise, parseUtterance, stripWake } from './intents.ts';
 import { answerToSpeech, toSpeech } from './speech.ts';
 
 const FOLLOW_UP_MS = 8000;
+/** When the window would close while the owner is still talking, check again this much later. */
+const FOLLOW_UP_EXTEND_MS = 2000;
 const LEADER_KEY = 'jarvis.voice.leader';
 const me = Math.random().toString(36).slice(2);
 
@@ -81,23 +83,34 @@ export function startVoiceController(): () => void {
     }, Math.max(2000, lastCueAt + 8000 - Date.now()));
   };
 
+  /** Close the follow-up window later, but never while the owner is mid-sentence or being transcribed. */
+  const closeWindowIn = (ms: number) => {
+    if (followTimer) window.clearTimeout(followTimer);
+    followTimer = window.setTimeout(() => {
+      if (voice.state.status === 'hearing' || voice.state.status === 'thinking') return closeWindowIn(FOLLOW_UP_EXTEND_MS);
+      followTimer = null;
+      voice.setAwaiting(false);
+    }, ms);
+  };
   const openWindow = (ms = FOLLOW_UP_MS) => {
     voice.setAwaiting(true);
-    if (followTimer) window.clearTimeout(followTimer);
-    followTimer = window.setTimeout(() => voice.setAwaiting(false), ms);
+    closeWindowIn(ms);
   };
 
   /** Replies to the owner interrupt anything queued; event announcements wait their turn. */
   const reply = (text: string, windowMs = FOLLOW_UP_MS) => {
     queue = Promise.resolve();
     voice.stopSpeaking();
-    void voice.speak(text).then(() => openWindow(windowMs));
+    void voice.speak(text).then(() => {
+      if (windowMs) openWindow(windowMs);
+    });
   };
   const announce = (text: string, windowMs = 0) => {
     if (voice.state.status === 'off' && !voice.state.prefs.enabled) return;
+    // One failed line must not block every later announcement.
     queue = queue.then(() => voice.speak(text)).then(() => {
       if (windowMs) openWindow(windowMs);
-    });
+    }).catch(() => undefined);
   };
 
   const heartbeat = window.setInterval(() => {
@@ -134,6 +147,8 @@ export function startVoiceController(): () => void {
     try {
       switch (intent.kind) {
         case 'wake':
+          // Open the window now, not after "Yes?": the VAD often splits "Jarvis … research X" in two.
+          openWindow();
           return reply('Yes?');
         case 'stop':
           queue = Promise.resolve();
@@ -173,6 +188,7 @@ export function startVoiceController(): () => void {
           return reply('Cancelled.');
         }
         case 'conversation':
+          if (voice.state.prefs.speak.confirmations) reply('On it.', 0);
           await conversation(intent.text);
           return;
         case 'task': {
