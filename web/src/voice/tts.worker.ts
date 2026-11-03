@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 // Kokoro-82M text-to-speech, entirely on this device (WebGPU when available, otherwise WASM).
+import { modelProgress } from './loading.ts';
 import { KokoroTTS, env } from 'kokoro-js';
 import { sentences } from './speech.ts';
 
@@ -37,11 +38,12 @@ let loading: Promise<KokoroTTS> | null = null;
 const post = (m: unknown, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
 
 async function create(device: 'webgpu' | 'wasm', dtype: 'fp32' | 'q8') {
+  const progress_callback = await modelProgress('onnx-community/Kokoro-82M-v1.0-ONNX',
+    ['config.json', 'tokenizer.json', 'tokenizer_config.json', `onnx/model${dtype === 'q8' ? '_quantized' : ''}.onnx`],
+    (load) => post({ type: 'model-load', what: 'voice', load }));
   return KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
     dtype, device,
-    progress_callback: (p: { status: string; progress?: number; file?: string }) => {
-      if (p.status === 'progress') post({ type: 'progress', what: 'voice', file: p.file, progress: p.progress ?? 0 });
-    },
+    progress_callback,
   });
 }
 
