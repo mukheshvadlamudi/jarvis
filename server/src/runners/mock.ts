@@ -214,6 +214,10 @@ function summaryFor(input: RunInput, toolCalls: number): string {
 
 /** A plausible conversational answer for the demo (chat runs). */
 function chatAnswer(input: RunInput): string {
+  if (/Start (?:your answer )?with APPROVE or REQUEST CHANGES/.test(input.prompt)) return 'APPROVE — The change and tests cover the requested fix. Mock review; no remote action was performed.';
+  if (input.prompt.startsWith('Give exactly 3 short spoken-ready')) return 'The research report is ready. Claude checked the claims and sources. Read the caveats before choosing. Full report in the conversation';
+  if (/^Give a 4.6 sentence spoken morning/.test(input.prompt)) return 'Your agent plans have room for today’s work. Claude and Codex are ready. Check the scheduled routines before starting a new task. Your Inbox notes are included in this conversation. External calendar data is unavailable.';
+
   const asked = input.prompt.split('New message from the owner:').pop()!.replace(/\[mock:[a-z]+\]/g, '').trim().split('\n')[0] ?? '';
   const files = input.attachments?.length ? `\n\nI read the file you attached (${input.attachments.map((a) => a.name).join(', ')}) for this.` : '';
   if (/\?$/.test(asked) || /^(what|how|why|which|should|can|is|are|do|does)\b/i.test(asked)) {
@@ -308,6 +312,7 @@ export function createMockRunner(opts: MockRunnerOptions): AgentRunner {
               const text = followUps.shift()!;
               sink.emit({ kind: 'message', payload: { role: 'assistant', text: `Got it: "${text}". Applying that now.` } });
             } else if (step.do === 'file') {
+              if (input.sandbox === 'read-only') continue;
               try {
                 writeFileSync(join(input.cwd, step.path), step.content);
               } catch {

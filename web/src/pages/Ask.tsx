@@ -1,4 +1,6 @@
-import { History, MessageSquarePlus, Search } from 'lucide-react';
+import { WorkflowMenu, WorkflowProgress } from '../components/Workflows.tsx';
+import type { WorkflowList } from '../lib/workflows.ts';
+import { GitBranch, History, MessageSquarePlus, Search } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AgentStrip } from '../components/AgentStrip.tsx';
 import { VoiceMode, VoiceUsage } from '../components/voice-mode/VoiceMode.tsx';
@@ -88,7 +90,9 @@ export default function Ask({ params }: PageProps) {
   const { data, error, live, reload } = useConversation(id);
   const agents = useApi<{ agents: Record<AgentId, AgentStatus>; threshold: number }>('/api/agents', ['agents.updated', 'usage.updated', 'run.started', 'run.finished']);
   const [agentOverride, setAgentOverride] = useState<Record<AgentId, AgentStatus> | null>(null);
-  const [panel, setPanel] = useState<'history' | 'agents' | null>(null);
+  const workflowData = useApi<WorkflowList>(id ? `/api/workflows?conversationId=${id}` : null, ['workflow.updated','approval.updated','reconcile']);
+  const [panel, setPanel] = useState<'history' | 'agents' | 'workflows' | null>(null);
+  const workflowsButton = useRef<HTMLButtonElement>(null);
   const historyButton = useRef<HTMLButtonElement>(null);
   const agentsButton = useRef<HTMLButtonElement>(null);
   const composer = useRef<ComposerHandle | null>(null);
@@ -102,7 +106,7 @@ export default function Ask({ params }: PageProps) {
 
   const turns = conversationTurns(data?.runs ?? []);
   const mainRuns = turns.map((t) => t.run);
-  const running = !!data?.active || turns.some((t) => [t.run, ...t.sides, ...t.consults].some((r) => r.status === 'running'));
+  const running = workflowData.data?.runs.some(r => ['running','waiting_approval'].includes(r.status)) || !!data?.active || turns.some((t) => [t.run, ...t.sides, ...t.consults].some((r) => r.status === 'running'));
   const lastAgent = (mainRuns.at(-1)?.agent as AgentId | undefined) ?? null;
 
   useEffect(() => {
@@ -127,7 +131,9 @@ export default function Ask({ params }: PageProps) {
   }, [data?.conversation?.title]);
 
   const stop = async () => {
-    if (id) await post(`/api/tasks/${id}/cancel`).catch(() => undefined);
+    const workflow = workflowData.data?.runs.find(r => ['running','waiting_approval'].includes(r.status));
+    if (workflow) await post(`/api/workflow-runs/${workflow.id}/cancel`);
+    else if (id) await post(`/api/tasks/${id}/cancel`).catch(() => undefined);
   };
 
   return (
@@ -137,6 +143,7 @@ export default function Ask({ params }: PageProps) {
           <h1 className="ask-conversation-title" title={data?.conversation.title}>{data?.conversation.title ?? 'Ask'}</h1>
           <nav aria-label="Conversation controls">
             <div className="ask-mode" role="group" aria-label="Conversation mode">{(['chat', 'voice'] as const).map((value) => <button key={value} aria-pressed={mode === value} onClick={() => changeMode(value)}>{value === 'chat' ? 'Chat' : 'Voice'}</button>)}</div>
+            <button ref={workflowsButton} className="btn ghost sm" aria-label="Workflows" aria-haspopup="dialog" aria-expanded={panel === 'workflows'} onClick={() => setPanel('workflows')}><GitBranch size={16} strokeWidth={1.5} /><span className="ask-control-label">Workflows</span></button>
             <button ref={historyButton} className="btn ghost sm" aria-label="History" aria-haspopup="dialog" aria-expanded={panel === 'history'} onClick={() => setPanel('history')}><History size={16} strokeWidth={1.5} /><span className="ask-control-label">History</span></button>
             <button ref={agentsButton} className="btn ghost sm" aria-label="Agents" aria-haspopup="dialog" aria-expanded={panel === 'agents'} onClick={() => setPanel('agents')}>
               <span className="ask-agent-dots">{(['claude', 'codex'] as const).map((a) => <span key={a} title={`${agentName(a)}: ${agentState?.[a]?.state ?? 'checking'}`} className={`dot${agentState?.[a]?.state === 'busy' ? ' live' : ''}`} style={{ color: agentState?.[a]?.state === 'busy' ? 'var(--accent)' : agentState?.[a]?.state === 'signed_out' ? 'var(--danger)' : agentState?.[a]?.state === 'limited' ? 'var(--warning)' : 'var(--text-faint)' }} />)}</span><span className="ask-control-label">Agents</span>
@@ -153,6 +160,7 @@ export default function Ask({ params }: PageProps) {
             stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
           }}
         >
+          {workflowData.data?.runs.slice(0, 1).map(r => <WorkflowProgress key={r.id} run={r} approvals={data?.approvals} onChanged={() => { workflowData.reload(); void reload(); }} />)}
           {error ? <ErrorBox error={error} onRetry={() => void reload()} /> : null}
           {!id ? (
             <div className="ask-welcome">
@@ -215,8 +223,8 @@ export default function Ask({ params }: PageProps) {
         </>}
       </section>
       {panel ? (
-        <Popover title={panel === 'history' ? 'History' : 'Agents'} anchor={panel === 'history' ? historyButton.current : agentsButton.current} search={panel === 'history'} onClose={() => setPanel(null)}>
-          {panel === 'history' ? <HistoryList activeId={id} onPick={() => setPanel(null)} /> : <><AgentStrip agents={agentState} threshold={agents.data?.threshold ?? 85} picked="" onPick={(a) => { setPanel(null); requestAnimationFrame(() => composer.current?.pick(a)); }} onRefreshed={setAgentOverride} /><VoiceUsage /></>}
+        <Popover title={panel === 'history' ? 'History' : panel === 'workflows' ? 'Workflows' : 'Agents'} anchor={panel === 'history' ? historyButton.current : panel === 'workflows' ? workflowsButton.current : agentsButton.current} search={panel === 'history'} onClose={() => setPanel(null)}>
+          {panel === 'workflows' ? <WorkflowMenu conversationId={id ?? undefined} onStarted={() => { setPanel(null); workflowData.reload(); void reload(); }} /> : panel === 'history' ? <HistoryList activeId={id} onPick={() => setPanel(null)} /> : <><AgentStrip agents={agentState} threshold={agents.data?.threshold ?? 85} picked="" onPick={(a) => { setPanel(null); requestAnimationFrame(() => composer.current?.pick(a)); }} onRefreshed={setAgentOverride} /><VoiceUsage /></>}
         </Popover>
       ) : null}
     </div>

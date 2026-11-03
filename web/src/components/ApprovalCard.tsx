@@ -25,7 +25,7 @@ export function commandOf(a: Approval): string {
   return JSON.stringify(input, null, 2);
 }
 
-export function ApprovalCard({ a, onDecided, compact }: { a: Approval; onDecided?: () => void; compact?: boolean }) {
+export function ApprovalCard({ a, onDecided, compact, inline, onCancel, cancelling }: { a: Approval; onDecided?: () => void; compact?: boolean; inline?: boolean; onCancel?: () => void; cancelling?: boolean }) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<null | 'approved' | 'rejected'>(null);
   const what = a.summary.replace(/^[A-Za-z_]+: /, '');
@@ -43,6 +43,7 @@ export function ApprovalCard({ a, onDecided, compact }: { a: Approval; onDecided
     }
   };
   const pending = a.status === 'pending';
+  if (inline) return <article className="approval workflow-approval-inline" aria-label={`Approval: ${a.summary}`}><div className="approval-what">{what}</div>{pending && <div className="workflow-approval-buttons"><button className="btn primary sm" disabled={!!busy} onClick={() => void decide('approved')}>Approve</button><button className="btn ghost sm" disabled={!!busy} onClick={() => void decide('rejected')}>Reject</button>{onCancel && <button className="btn ghost sm" disabled={cancelling} onClick={onCancel}>Cancel workflow</button>}</div>}</article>;
   return (
     <article className="approval" aria-label={`Approval: ${a.summary}`}>
       <div className="approval-meta">

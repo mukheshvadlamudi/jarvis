@@ -38,7 +38,7 @@ export interface Task {
   mode: TaskMode;
 }
 
-export type RunPurpose = 'user_reply' | 'both' | 'second_opinion' | 'consult' | 'learning' | 'handoff' | 'maintenance' | 'verify';
+export type RunPurpose = 'user_reply' | 'both' | 'second_opinion' | 'consult' | 'learning' | 'handoff' | 'maintenance' | 'verify' | 'workflow_step';
 export type RunVisibility = 'conversation' | 'activity' | 'internal';
 
 export interface Run {

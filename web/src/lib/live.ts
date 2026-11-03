@@ -21,7 +21,7 @@ let generation = 0;
 function publish(e: LiveEvent) { listeners.forEach((l) => l(e)); }
 
 const TYPES = [
-  'hello', 'task.created', 'task.updated', 'task.deleted', 'run.started', 'run.event', 'run.delta', 'run.finished', 'agents.updated',
+  'workflow.updated', 'hello', 'task.created', 'task.updated', 'task.deleted', 'run.started', 'run.event', 'run.delta', 'run.finished', 'agents.updated',
   'approval.created', 'approval.updated', 'usage.updated', 'project.created', 'project.updated', 'seeded',
   'memory.updated', 'memory.proposal', 'skills.updated', 'schedule.updated', 'schedule.ran', 'feed.updated', 'notify',
 ];

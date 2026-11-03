@@ -1,3 +1,6 @@
+import { useApi } from '../lib/hooks.ts';
+import { shortcut } from '../lib/workflows.ts';
+import type { WorkflowList } from '../lib/workflows.ts';
 import { ArrowUp, ChevronDown, FileText, Image as ImageIcon, Paperclip, Square, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { AgentChoice, AgentStatus, EffortChoice, Uploaded } from '../lib/ask.ts';
@@ -50,6 +53,7 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
   handle?: (h: ComposerHandle) => void;
   placeholder?: string;
 }) {
+  const workflows = useApi<WorkflowList>('/api/workflows', ['workflow.updated']);
   const [text, setText] = useState('');
   const [agent, setAgent] = useLocalState<AgentChoice>('jarvis.ask.agent', 'auto');
   const [models, setModels] = useLocalState<Record<string, string>>('jarvis.ask.models', {});
@@ -135,6 +139,11 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
       attachments: files.filter((f) => f.upload).map((f) => f.upload!.id),
     };
     try {
+      const workflow = shortcut(t, workflows.data?.workflows ?? []);
+      if (workflow) {
+        const r = await post<{ conversationId: string }>(`/api/workflows/${workflow.definition.id}/run`, { input: workflow.input, conversationId: conversationId ?? undefined });
+        setText(''); setFiles([]); onSent(r.conversationId); return;
+      }
       const r = conversationId
         ? await post<{ conversation: { id: string } }>(`/api/conversations/${conversationId}/messages`, body)
         : await post<{ conversation: { id: string } }>('/api/conversations', body);
@@ -167,6 +176,7 @@ export function Composer({ conversationId, running, lastAgent, agents, onSent, o
         if (e.dataTransfer.files.length) add(e.dataTransfer.files);
       }}
     >
+      {text.trimStart().startsWith('/') && <div className="workflow-slash-hints">{workflows.data?.workflows.filter(w => w.triggers.some(t => t.startsWith('/') && t.startsWith(text.trim().split(/\s/)[0]))).map(w => <button type="button" className="btn ghost sm" key={w.id} onClick={() => { setText(`${w.triggers.find(t => t.startsWith('/'))} `); box.current?.focus(); }}>{w.triggers.find(t => t.startsWith('/'))} · {w.name}</button>)}</div>}
       <div className="composer-panel">
       {files.length ? (
         <ul className="composer-files" aria-label="Attached files">

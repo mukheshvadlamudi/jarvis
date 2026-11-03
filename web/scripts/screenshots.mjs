@@ -46,6 +46,13 @@ try {
   const codeTask = done.tasks.find((t) => t.title.startsWith('Fix the token refresh race')) ?? done.tasks[0];
   const extra = JSON.parse(process.env.SHOT_PAGES ?? '[]');
   let pages = [
+    { name: 'workflows', path: '/workflows' },
+    { name: 'workflows-editor', path: '/workflows', click: '.workflow-library-actions button:has-text("Duplicate") >> nth=0' },
+    { name: 'workflows-editor-steps', path: '/workflows', click: '.workflow-library-actions button:has-text("Duplicate") >> nth=0', after: () => document.querySelector('.workflow-edit-steps').scrollIntoView({ block: 'start' }) },
+    { name: 'ask-workflow-shortcut', path: '/', fill: '/rese' },
+    { name: 'ask-workflow', path: '/c/t_workflow_waiting', action: () => { document.querySelector('.ask-thread').scrollTop = 0; } },
+    { name: 'ask-workflow-done', path: '/c/t_workflow_done', action: () => { document.querySelector('.ask-thread').scrollTop = 0; } },
+    { name: 'ask-workflows', path: '/', click: 'button[aria-label="Workflows"]' },
     { name: 'ask', path: '/' },
     { name: 'ask-voice', path: '/', click: '.ask-mode button:nth-child(2)', voice: true },
     { name: 'ask-voice-settings', path: '/', voice: true, click: '.ask-mode button:nth-child(2)', settings: true },
@@ -97,6 +104,8 @@ try {
           await page.click(p.click);
           await page.waitForTimeout(500);
         }
+        if (p.after) await page.evaluate(p.after);
+        if (p.fill) { await page.locator('#ask-input').fill(p.fill); await page.waitForTimeout(300); }
         if (p.settings && vp.mobile) await page.getByRole('button', { name: 'Voice settings', exact: true }).click();
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         const file = join(outDir, `${p.name}-${vp.tag}-${theme}.png`);

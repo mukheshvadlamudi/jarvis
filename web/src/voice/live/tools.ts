@@ -1,6 +1,7 @@
 import { api } from '../../lib/api.ts';
 import { subscribeLive } from '../../lib/live.ts';
 import type { LiveEvent } from '../../lib/live.ts';
+import type { RunDetail, WorkflowList } from '../../lib/workflows.ts';
 
 interface UsageWin { usedPercent: number; resetsAt: string | null }
 interface AgentSummary { state: string; detail?: string; busy?: Array<{ title: string }>; usage: { five_hour: UsageWin | null; weekly: UsageWin | null } }
@@ -35,6 +36,11 @@ export class VoiceTools {
     return value.trim();
   }
   async handle(name: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (name === 'list_workflows') {
+      const list = await this.request<WorkflowList>('/api/workflows', { signal });
+      return { workflows: list.workflows.map(({ id, name, description, triggers, input }) => ({ id, name, description, triggers, input })) };
+    }
+    if (name === 'run_workflow') return this.runWorkflow(args, signal);
     if (name === 'search_memory') {
       const r = await this.request<{ results: Array<{ title: string; snippet?: string }> }>(`/api/memory/search?q=${encodeURIComponent(this.text(args, 'query'))}&limit=5`, { signal });
       return { results: r.results.slice(0, 5).map((r) => ({ title: r.title, snippet: (r.snippet ?? '').slice(0, 350) })) };
@@ -113,6 +119,44 @@ export class VoiceTools {
           if (seen.has(runId)) finish(seen.get(runId)!);
           await reconcile();
         } catch (error) { if (!done) { done = true; cleanup(); reject(error); } }
+      })();
+    });
+  }
+  private async runWorkflow(args: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    const name = this.text(args, 'workflow');
+    if (args.input !== undefined && typeof args.input !== 'string') throw new Error('Workflow input must be text');
+    const list = await this.request<WorkflowList>('/api/workflows', { signal });
+    const workflow = list.workflows.find(w => w.id.toLowerCase() === name.toLowerCase() || w.name.toLowerCase() === name.toLowerCase() || w.triggers.some(t => t.toLowerCase() === name.toLowerCase()));
+    if (!workflow) throw new Error('No workflow with that name. Use list_workflows to see the available routines.');
+    return new Promise((resolve, reject) => {
+      let id: string | undefined; let done = false; let checking = false; let again = false;
+      const cleanup = () => { off(); clearTimeout(timeout); clearInterval(fallback); signal?.removeEventListener('abort', abort); this.pending.delete(abort); };
+      const abort = () => { if (!done) { done = true; cleanup(); reject(new Error('Voice tool cancelled; the workflow remains in Ask')); } };
+      const finish = (w: RunDetail) => {
+        if (done || w.id !== id || w.status === 'running') return;
+        done = true; cleanup();
+        resolve({ status: w.status, workflowRunId: w.id, conversationId: w.conversation_id, answer: w.status === 'waiting_approval' ? `Waiting for your OK: ${w.definition.steps[w.current_step].kind === 'approval' ? (w.definition.steps[w.current_step] as { summary: string }).summary : w.results?.[w.definition.steps[w.current_step].id]?.answer || 'approve the action in Ask'}` : plainAnswer(w.summary || w.error || w.status).slice(0,1500) });
+      };
+      const check = async () => {
+        if (!id || done) return;
+        if (checking) { again = true; return; }
+        checking = true;
+        try { finish(await this.request<RunDetail>(`/api/workflow-runs/${id}`, { signal })); }
+        catch(e) { if (!done) { done = true; cleanup(); reject(e); } }
+        finally { checking = false; if (again) { again = false; void check(); } }
+      };
+      const off = this.subscribe(event => { if (event.type === 'workflow.updated' && event.data.id === id) finish(event.data); if (['hello','reconcile'].includes(event.type)) void check(); });
+      const timeout = setTimeout(() => { if (!done) { done = true; cleanup(); reject(new Error('The workflow is still on screen; check Ask for progress')); } }, 30*60_000);
+      const fallback = setInterval(() => void check(), 15_000);
+      this.pending.add(abort); signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) { abort(); return; }
+      void (async () => {
+        try {
+          const result = await this.request<{ workflowRunId: string; conversationId: string }>(`/api/workflows/${workflow.id}/run`, { method: 'POST', body: { input: args.input ?? '', conversationId: this.conversationId ?? undefined } });
+          id = result.workflowRunId;
+          this.conversationId = result.conversationId; this.changed(result.conversationId);
+          if (!done) await check();
+        } catch(e) { if (!done) { done = true; cleanup(); reject(e); } }
       })();
     });
   }
