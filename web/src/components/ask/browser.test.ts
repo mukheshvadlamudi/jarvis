@@ -17,7 +17,7 @@ const assets = new Map<string, string | Uint8Array>();
 beforeAll(async () => {
   const root = resolve(import.meta.dirname, '../..');
   const entry = `import {createElement} from 'react'; import {createRoot} from 'react-dom/client'; import Ask from '${root.replaceAll('\\', '/')}/pages/Ask.tsx'; import {connectLive} from '${root.replaceAll('\\', '/')}/lib/live.ts'; connectLive(); createRoot(document.getElementById('root')).render(createElement(Ask,{params:location.pathname.startsWith('/c/')?{id:'test'}:{}}));`;
-  const result = await build({ configFile: false, root: resolve(root, '..'), logLevel: 'silent', plugins: [react(), { name: 'ask-test-entry', resolveId: (id) => id === 'virtual:ask-test' ? id : undefined, load: (id) => id === 'virtual:ask-test' ? entry : undefined }], build: { write: false, minify: false, rolldownOptions: { input: 'virtual:ask-test', output: { codeSplitting: false } } } });
+  const result = await build({ configFile: false, root: resolve(root, '..'), logLevel: 'silent', plugins: [react(), { name: 'ask-test-entry', resolveId: (id) => id === 'virtual:ask-test' ? id : undefined, load: (id) => id === 'virtual:ask-test' ? entry : undefined }], build: { write: false, minify: false, rolldownOptions: { input: 'virtual:ask-test', external: ['@ricky0123/vad-web'], output: { codeSplitting: false } } } });
   const output = Array.isArray(result) ? result[0].output : 'output' in result ? result.output : [];
   bundle = output.map((c) => c.type === 'chunk' ? c.code : '').join('\n');
   for (const c of output) if (c.type === 'asset') assets.set(`/${c.fileName}`, c.source);

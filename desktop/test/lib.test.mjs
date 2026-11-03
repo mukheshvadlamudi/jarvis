@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { join } from 'node:path';
-import { layout, loginTerminalCommand, parseEnvFile, parseSse, serverEnv } from '../lib.mjs';
+import { layout, loginTerminalCommand, parseEnvFile, parseSse, serverEnv, registerAnywhereShortcut, pasteWithClipboard } from '../lib.mjs';
 
 test('parses .env files', () => {
   assert.deepEqual(parseEnvFile('# c\nA=1\nB="two words"\nEMPTY=\n bad line\nC=\'x\''), { A: '1', B: 'two words', C: 'x' });
@@ -38,4 +38,41 @@ test('parses SSE chunks across boundaries', () => {
   assert.deepEqual(a.events, [{ type: 'approval.created', data: { id: 'a_1' } }]);
   const b = parseSse(`${a.rest}ta: {}\n\n`);
   assert.deepEqual(b.events, [{ type: 'ping', data: {} }]);
+});
+
+test('anywhere shortcut checks registration and reports fallback or complete failure', () => {
+  const calls = [];
+  const register = (key) => { calls.push(key); return key === 'Control+Alt+Space'; };
+  const result = registerAnywhereShortcut(register, 'Control+Space', () => {});
+  assert.deepEqual(calls, ['Control+Space', 'Control+Alt+Space']);
+  assert.equal(result.shortcut, 'Control+Alt+Space');
+  assert.match(result.warning, /unavailable/);
+  assert.equal(registerAnywhereShortcut(() => true, 'Control+Space', () => {}).warning, '');
+  assert.equal(registerAnywhereShortcut(() => { throw Error('invalid'); }, 'bad', () => {}).shortcut, null);
+});
+
+test('clipboard saves before writing, restores focus before pasting, and restores after one second', async () => {
+  const calls = [];
+  await pasteWithClipboard('dictation', {
+    save: () => { calls.push('save'); return ['old formats']; },
+    write: (text) => calls.push(['write', text]),
+    restoreFocus: () => calls.push('focus'),
+    paste: () => calls.push('paste'),
+    delay: (ms) => calls.push(['delay', ms]),
+    unchanged: () => true,
+    restore: (old) => calls.push(['restore', old]),
+  });
+  assert.deepEqual(calls, ['save', ['write', 'dictation'], 'focus', 'paste', ['delay', 1000], ['restore', ['old formats']]]);
+});
+
+test('clipboard is restored on focus failure and a newer copy is preserved', async () => {
+  let pasted = false;
+  let restored = false;
+  const deps = { save: () => 'old', write: () => {}, restoreFocus: () => { throw Error('focus'); }, paste: () => { pasted = true; }, delay: () => {}, unchanged: () => true, restore: () => { restored = true; } };
+  await assert.rejects(pasteWithClipboard('new', deps), /focus/);
+  assert.equal(pasted, false);
+  assert.equal(restored, true);
+  restored = false;
+  await pasteWithClipboard('new', { ...deps, restoreFocus: () => {}, unchanged: () => false });
+  assert.equal(restored, false);
 });

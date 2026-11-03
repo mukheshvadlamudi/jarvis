@@ -11,7 +11,7 @@
   },
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/lib.test.mjs"
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "electron": "^45.2.1",

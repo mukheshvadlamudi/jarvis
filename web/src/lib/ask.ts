@@ -106,7 +106,7 @@ export function sideLabel(run: Run): { kind: 'both' | 'second opinion'; text: st
     : purpose === 'second_opinion' ? { kind: 'second opinion', text: `${agentName(run.agent)}'s second opinion` } : null;
 }
 
-export const agentName = (a: string | null | undefined) => (a === 'claude' ? 'Claude' : a === 'codex' ? 'Codex' : 'Jarvis');
+export const agentName = (a: string | null | undefined) => (a === 'claude' ? 'Claude' : a === 'codex' ? 'Codex' : a === 'gemini' ? 'Jarvis (voice)' : 'Jarvis');
 export const otherAgent = (a: AgentId): AgentId => (a === 'claude' ? 'codex' : 'claude');
 
 /** Upload one file as a raw body. The server copies it into the run folder when it is used. */

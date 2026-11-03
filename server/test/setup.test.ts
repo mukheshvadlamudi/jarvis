@@ -15,7 +15,8 @@ describe('setup', () => {
     ctx = makeCtx();
     const r = await ctx.req('GET', '/api/setup');
     const ids = r.json.checks.map((c: { id: string }) => c.id);
-    expect(ids).toEqual(['node', 'git', 'keys', 'claude', 'codex', 'vault', 'projects', 'gh', 'skills', 'routines', 'telegram']);
+    expect(ids).toEqual(['node', 'git', 'keys', 'claude', 'claude-chrome', 'codex', 'vault', 'projects', 'gh', 'skills', 'routines', 'telegram']);
+    expect(r.json.checks.find((c: { id: string }) => c.id === 'claude-chrome')).toMatchObject({ required: false, state: 'optional' });
     expect(r.json.checks.find((c: { id: string }) => c.id === 'node').state).toBe('ok');
     expect(r.json.checks.find((c: { id: string }) => c.id === 'vault').state).toBe('todo');
     expect(r.json.progress.total).toBe(6);

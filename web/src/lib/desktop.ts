@@ -5,6 +5,8 @@ export interface DesktopBridge {
   openPath: (which: 'data' | 'logs') => Promise<string>;
   info: () => Promise<{ version: string; packaged: boolean; dataDir: string; attached: boolean }>;
   onCapture: (fn: () => void) => () => void;
+  /** The global "Jarvis anywhere" overlay started or stopped using the microphone. */
+  onAnywhereActive?: (fn: (active: boolean) => void) => () => void;
 }
 
 export const desktop: DesktopBridge | undefined = typeof window !== 'undefined' ? (window as unknown as { jarvisDesktop?: DesktopBridge }).jarvisDesktop : undefined;

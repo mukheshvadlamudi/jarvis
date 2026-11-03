@@ -262,7 +262,9 @@ export class Orchestrator {
     const t = this.d.tasks.get(taskId);
     if (!t) throw new Error('not_found');
     const last = this.lastRun(taskId);
-    const agent = opts.agent ?? (last?.agent as AgentId | undefined);
+    // Stay with the agent that answered last; a voice turn (Gemini) is not an agent, so route normally.
+    const lastAgent = last?.agent === 'claude' || last?.agent === 'codex' ? last.agent : undefined;
+    const agent = opts.agent ?? lastAgent;
     const contaminated = last?.session_id && get(this.d.db, "SELECT id FROM runs WHERE task_id = ? AND session_id = ? AND visibility = 'internal' LIMIT 1", taskId, last.session_id);
     const same = !!last && last.agent === agent && !!last.session_id && !contaminated;
     if (t.status !== 'queued') this.d.tasks.setStatus(taskId, 'queued', { not_before: null });
@@ -286,7 +288,7 @@ export class Orchestrator {
   history(taskId: string): string {
     const runs = all<Run>(this.d.db, "SELECT * FROM runs WHERE task_id = ? AND status = 'done' AND visibility = 'conversation' AND purpose IN ('user_reply', 'both', 'second_opinion', 'handoff') ORDER BY started_at, rowid", taskId);
     const who = (r: Run) => {
-      const name = r.agent === 'claude' ? 'Claude' : r.agent === 'codex' ? 'Codex' : r.agent;
+      const name = r.agent === 'claude' ? 'Claude' : r.agent === 'codex' ? 'Codex' : r.agent === 'gemini' ? 'Jarvis (voice)' : r.agent;
       return r.purpose === 'both' || r.purpose === 'second_opinion' ? `${name} (${r.purpose})` : name;
     };
     const turns: string[] = [];

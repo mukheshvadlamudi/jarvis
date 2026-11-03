@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { sanitizedAgentEnv } from '../src/util/env.ts';
-import { GeminiLive, pickLiveModel } from '../src/voice/gemini.ts';
+import { GeminiLive, pickLiveModel, pickFallbackModel } from '../src/voice/gemini.ts';
 import { makeCtx } from './helpers.ts';
 import type { TestCtx } from './helpers.ts';
 
@@ -54,6 +54,30 @@ describe('Gemini Live voice brain', () => {
     const r = await ctx.req('GET', '/api/voice/live');
     expect(r.json).toMatchObject({ configured: false });
     expect((await ctx.req('POST', '/api/voice/live/token')).status).toBe(409);
+  });
+
+  it('exposes a native-audio fallback even with a primary model override', async () => {
+    ctx = makeCtx({ env: { GEMINI_API_KEY: 'fake-key', GEMINI_LIVE_MODEL: 'gemini-3.8-live' } });
+    const calls: Array<Record<string, unknown>> = [];
+    const live = new GeminiLive(ctx.s, fakeAi(calls));
+    expect(await live.fallbackModel()).toBe('gemini-3.1-flash-native-audio-preview');
+    const token = await live.token('fallback');
+    expect(token.model).toBe(token.fallbackModel);
+    expect(calls[0]).toMatchObject({ uses: 1 });
+  });
+
+  it('prefers a latest native-audio alias to a preview at the same version', () => {
+    expect(pickLiveModel([
+      { name: 'gemini-2.5-flash-native-audio-preview-12-2025', actions: ['bidiGenerateContent'] },
+      { name: 'gemini-2.5-flash-native-audio-latest', actions: ['bidiGenerateContent'] },
+    ])).toBe('gemini-2.5-flash-native-audio-latest');
+  });
+
+  it('uses a stable native-audio fallback in preference to a newer preview', () => {
+    expect(pickFallbackModel([
+      { name: 'gemini-3.1-flash-native-audio-preview', actions: ['bidiGenerateContent'] },
+      { name: 'gemini-2.5-flash-native-audio-latest', actions: ['bidiGenerateContent'] },
+    ])).toBe('gemini-2.5-flash-native-audio-latest');
   });
 
   it('never passes the Gemini key to Claude Code or Codex', () => {

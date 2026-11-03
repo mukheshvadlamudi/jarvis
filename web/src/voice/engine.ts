@@ -6,6 +6,7 @@ import { sentences } from './speech.ts';
 import { openMicrophone, resolveMic } from './microphone.ts';
 import { modelLoadLabel } from './loading.ts';
 import type { ModelLoad } from './loading.ts';
+import { desktop } from '../lib/desktop.ts';
 
 /** Per-device voice preferences (voice runs in this browser/app, so they live in localStorage). */
 export interface VoicePrefs {
@@ -117,11 +118,22 @@ const STALLED_STT = 'Speech recognition stalled, please say that again';
  * Nothing leaves the device and nothing costs credits.
  */
 class VoiceEngine {
+  /** Full voice conversation bypasses wake words; background hands-free retains its preference. */
+  focusedSession = false;
+  pushToTalk = false;
+  setFocusedSession(value: boolean) { this.focusedSession = value; }
   state: VoiceState = { status: 'off', muted: false, turnStatus: 'Smart Turn loads on first turn', micLabel: '', micFallback: '', persisted: null, loads: {}, prefs: loadPrefs(), progress: { voice: 0, ears: 0 }, device: null, natural: 'unloaded', naturalError: null, adapter: '', fallback: '', activeEngine: null, outcome: '', ignored: false, heard: '', said: '', awaiting: false, level: 0, error: null, needsGesture: false };
   speechEpoch = 0;
   private turnId = 0;
   private generations = { voice: 0, ears: 0, turn: 0 };
   private gain: GainNode | null = null;
+  private analyser: AnalyserNode | null = null;
+  private outputSamples = new Float32Array(256);
+  get outputLevel(): number {
+    if (!this.analyser || !this.playing.length) return 0;
+    this.analyser.getFloatTimeDomainData(this.outputSamples);
+    return Math.sqrt(this.outputSamples.reduce((sum, x) => sum + x * x, 0) / this.outputSamples.length);
+  }
   private onset: number | null = null;
   private ducked = false;
   private segmentHuman = false;
@@ -130,6 +142,7 @@ class VoiceEngine {
   private segmentFrames: Float32Array[] = [];
   private segmentSamples = 0;
   private segmentCapped = false;
+  private focusedTranscriptions = Promise.resolve();
   private cancelId = 0;
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private sttStarted = new Map<number, () => void>();
@@ -142,6 +155,7 @@ class VoiceEngine {
   onStopSpeaking: (() => void) | null = null;
   onStopAgent: (() => void) | null = null;
   onTurnStart: (() => void) | null = null;
+  onRecognitionEnd: ((text: string | null) => void) | null = null;
   private token(generation: number): VoiceToken { return { turnId: this.turnId, speechEpoch: this.speechEpoch, generation }; }
   private current(token: VoiceToken): boolean { return token.turnId === this.turnId && token.speechEpoch === this.speechEpoch; }
   private outputGain(value: number) { this.gain?.gain.setTargetAtTime(value, this.ctx?.currentTime ?? 0, 0.02); }
@@ -149,6 +163,20 @@ class VoiceEngine {
     if (!this.paused) return;
     this.paused = false; void this.ctx?.resume?.();
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.resume?.();
+  }
+  /**
+   * The desktop overlay (global hotkey) is using the mic: pause this window's listening so the two
+   * never hear the same speech, and resume afterwards only if the pause was ours.
+   */
+  private heldByOverlay = false;
+  holdForOverlay(active: boolean) {
+    if (active && !this.state.muted) {
+      this.heldByOverlay = true;
+      this.muteMic();
+    } else if (!active && this.heldByOverlay) {
+      this.heldByOverlay = false;
+      if (this.state.muted) this.muteMic();
+    }
   }
   muteMic() {
     this.set({ muted: !this.state.muted, level: 0, awaiting: false, status: this.speaking() ? 'speaking' : this.vad ? 'listening' : 'idle' });
@@ -443,7 +471,7 @@ class VoiceEngine {
             return stream;
           },
           onFrameProcessed: (p: { isSpeech: number }, frame?: Float32Array) => {
-            if (this.state.muted || (this.speaking() && this.state.prefs.interruptions === 'speaker-safe')) return;
+            if (this.state.muted || (this.speaking() && this.state.prefs.interruptions === 'speaker-safe' && !this.pushToTalk)) return;
             if (frame && this.turnStarted && !this.segmentCapped) {
               const remaining = Math.max(0, 480000 - this.turnAudio.length - this.segmentSamples);
               const chunk = frame.slice(0, remaining);
@@ -463,10 +491,11 @@ class VoiceEngine {
                 if (Date.now() - this.onset >= 200 && p.isSpeech >= 0.8 && !this.paused) { this.paused = true; void this.ctx?.suspend?.(); if (typeof speechSynthesis !== 'undefined') speechSynthesis.pause?.(); }
               } else { this.onset = null; if (this.ducked && !this.segmentHuman) { this.ducked = false; this.outputGain(1); this.resumeOutput(); } }
             }
-            if (Math.abs(p.isSpeech - this.state.level) > 0.05) this.set({ level: p.isSpeech });
+            const level = frame ? Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length) : p.isSpeech;
+            if (Math.abs(level - this.state.level) > 0.005) this.set({ level });
           },
           onSpeechStart: () => {
-            if (this.state.muted || (this.speaking() && this.state.prefs.interruptions === 'speaker-safe')) return;
+            if (this.state.muted || (this.speaking() && this.state.prefs.interruptions === 'speaker-safe' && !this.pushToTalk)) return;
             if (!this.turnAudio.length) { ++this.turnId; this.turnStarted = Date.now(); this.onTurnStart?.(); }
             this.segmentHuman = false;
             this.segmentFrames = []; this.segmentSamples = 0; this.segmentCapped = false;
@@ -477,6 +506,7 @@ class VoiceEngine {
             if (!this.segmentSaid) this.set({ status: 'hearing' });
           },
           onVADMisfire: () => {
+            if (this.focusedSession) this.onRecognitionEnd?.(null);
             this.segmentHuman = false;
             this.ducked = false; this.onset = null; this.outputGain(1); this.resumeOutput();
             if (this.speaking()) return;
@@ -523,7 +553,14 @@ class VoiceEngine {
   }
 
   private async endpoint(audio: Float32Array) {
-    if (this.state.muted || (this.speaking() && this.state.prefs.interruptions === 'speaker-safe')) return;
+    if (this.state.muted || (this.speaking() && this.state.prefs.interruptions === 'speaker-safe' && !this.pushToTalk)) return;
+    if (this.focusedSession) {
+      const generation = this.micGeneration;
+      this.focusedTranscriptions = this.focusedTranscriptions.catch(() => undefined).then(async () => {
+        if (generation === this.micGeneration && this.focusedSession && this.state.prefs.enabled) await this.handleSpeech(audio);
+      });
+      return this.focusedTranscriptions;
+    }
     if (this.state.prefs.turnDetection === 'simple') return this.handleSpeech(audio);
     const remaining = Math.max(0, 480000 - this.turnAudio.length);
     const combined = new Float32Array(this.turnAudio.length + Math.min(remaining, audio.length));
@@ -572,20 +609,22 @@ class VoiceEngine {
       this.set({ status: 'thinking', heard: '…' });
     }
     const text = await this.transcribe(audio);
-    if (this.state.status === 'off' || this.state.muted || generation !== this.micGeneration || !this.current(token)) return;
+    if (this.state.status === 'off' || this.state.muted || generation !== this.micGeneration || (!this.focusedSession && !this.current(token))) return;
     if (this.state.status === 'thinking') this.set({ status: 'listening' });
-    if (text === null) return;
+    if (text === null) { if (this.focusedSession) this.onRecognitionEnd?.(null); return; }
     const weakOnset = !this.segmentHuman;
     this.segmentHuman = false;
     this.ducked = false; this.onset = null; this.outputGain(1);
-    if (echoOf && this.speaking() && weakOnset && isEcho(text, echoOf)) return;
+    if (echoOf && this.speaking() && weakOnset && isEcho(text, echoOf)) { if (this.focusedSession) this.onRecognitionEnd?.(null); return; }
     this.set({ heard: text });
     if (isNoise(text)) {
+      if (this.focusedSession) this.onRecognitionEnd?.(null);
       if (!echoOf) this.feedback('Not sure what you meant', false, true);
       return;
     }
+    if (this.focusedSession) this.onRecognitionEnd?.(text);
     // Barge-in: a real command (not noise, not Jarvis's own voice) stops Jarvis mid-line.
-    if (this.speaking() && parseUtterance(text, { requireWake: this.state.prefs.wakeWord, awaiting: this.state.awaiting }).kind !== 'ignore') this.stopSpeaking(false);
+    if (this.speaking() && (this.focusedSession || parseUtterance(text, { requireWake: this.state.prefs.wakeWord, awaiting: this.state.awaiting }).kind !== 'ignore')) this.stopSpeaking(false);
     this.onUtterance?.(text);
   }
 
@@ -655,7 +694,14 @@ class VoiceEngine {
     const src = ctx.createBufferSource();
     src.buffer = buf;
     this.gain ??= ctx.createGain?.() ?? null;
-    if (this.gain) { this.gain.connect(ctx.destination); src.connect(this.gain); } else src.connect(ctx.destination);
+    if (!this.analyser && ctx.createAnalyser) {
+      this.analyser = ctx.createAnalyser(); this.analyser.fftSize = 256;
+      this.gain?.connect(this.analyser);
+    }
+    if (this.gain) {
+      if (this.analyser) this.analyser.connect(ctx.destination); else this.gain.connect(ctx.destination);
+      src.connect(this.gain);
+    } else src.connect(ctx.destination);
     const at = Math.max(ctx.currentTime + 0.03, this.playhead);
     src.start(at);
     this.playhead = at + buf.duration + 0.12;
@@ -809,6 +855,8 @@ export function systemSpeechMs(text: string, speed: number): number {
 }
 
 export const voice = new VoiceEngine();
+// Desktop app: pause this window's mic while the global hotkey overlay is listening.
+desktop?.onAnywhereActive?.((active) => voice.holdForOverlay(active));
 
 export function useVoice(): VoiceState {
   return useSyncExternalStore(voice.subscribe, () => voice.state);

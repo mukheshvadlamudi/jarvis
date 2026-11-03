@@ -32,7 +32,7 @@ export interface JarvisConfig {
   telegram: { enabled: boolean };
   /** Per-agent harness settings. Empty strings mean "use the CLI's own default". */
   agents: {
-    claude: { model: string; effort: { low: string; medium: string; high: string } };
+    claude: { model: string; chrome: boolean; effort: { low: string; medium: string; high: string } };
     codex: { model: string; effort: { low: string; medium: string; high: string } };
   };
   collaboration: { maxConsultsPerTask: number; autoHandoffReview: boolean };
@@ -57,7 +57,7 @@ export const DEFAULT_CONFIG: JarvisConfig = {
   feeds: { fetchEveryHours: 6 },
   telegram: { enabled: true },
   agents: {
-    claude: { model: '', effort: { low: 'low', medium: '', high: 'high' } },
+    claude: { model: '', chrome: false, effort: { low: 'low', medium: '', high: 'high' } },
     codex: { model: '', effort: { low: 'low', medium: '', high: 'high' } },
   },
   collaboration: { maxConsultsPerTask: 2, autoHandoffReview: false },

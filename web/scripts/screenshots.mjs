@@ -47,6 +47,8 @@ try {
   const extra = JSON.parse(process.env.SHOT_PAGES ?? '[]');
   let pages = [
     { name: 'ask', path: '/' },
+    { name: 'ask-voice', path: '/', click: '.ask-mode button:nth-child(2)', voice: true },
+    { name: 'ask-voice-settings', path: '/', voice: true, click: '.ask-mode button:nth-child(2)', settings: true },
     { name: 'ask-conversation', path: '/c/t_demo_auth', action: () => { document.querySelector('.ask-thread').scrollTop = 0; } },
     { name: 'ask-work', path: '/c/t_demo_auth', action: () => { document.querySelector('.ask-thread').scrollTop = 0; }, click: '.work-toggle >> nth=0' },
     { name: 'ask-history', path: '/c/t_demo_auth', click: 'button[aria-label="History"]' },
@@ -78,6 +80,12 @@ try {
       await ctx.addInitScript((t) => { if (window === window.top) localStorage.setItem('jarvis.theme', t); }, theme);
       for (const p of pages) {
         const page = await ctx.newPage();
+        await page.addInitScript(() => { localStorage.setItem('jarvis.ask.mode', 'chat'); localStorage.setItem('jarvis.voice.bubble.hidden', 'true'); });
+        // The gate never contacts Gemini, including when a developer has a real key in .env.
+        await page.route('**/api/voice/live', (route) => route.fulfill({ json: { configured: true, model: 'gemini-3.8-live', fallbackModel: 'gemini-2.5-flash-native-audio-latest' } }));
+        await page.route('**/api/voice/live/token', (route) => route.fulfill({ status: 409, json: { error: 'screenshot', message: 'Offline screenshot fixture' } }));
+        await page.route(/https:\/\/.*(googleapis|generativelanguage).*/, (route) => route.abort());
+        if (p.voice) await page.emulateMedia({ reducedMotion: 'reduce' });
         const errors = [];
         page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
         page.on('pageerror', (e) => errors.push(String(e)));
@@ -89,6 +97,7 @@ try {
           await page.click(p.click);
           await page.waitForTimeout(500);
         }
+        if (p.settings && vp.mobile) await page.getByRole('button', { name: 'Voice settings', exact: true }).click();
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         const file = join(outDir, `${p.name}-${vp.tag}-${theme}.png`);
         await page.screenshot({ path: file, fullPage: !p.click }); // fixed sheets render wrongly in stitched full-page captures

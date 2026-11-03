@@ -128,6 +128,7 @@ export function startVoiceController(): () => void {
   };
 
   const heartbeat = window.setInterval(() => {
+    if (voice.focusedSession) return;
     const p = voice.state.prefs;
     if (!p.enabled) return;
     if (isLeader()) {
@@ -162,6 +163,7 @@ export function startVoiceController(): () => void {
   };
 
   voice.onUtterance = async (text) => {
+    if (voice.focusedSession) return;
     const intent = parseUtterance(text, { requireWake: voice.state.prefs.wakeWord, awaiting: voice.state.awaiting });
     if (intent.kind === 'ignore') {
       const noise = isNoise(text) || (stripWake(text) !== null && isNoise(stripWake(text)!));
@@ -247,6 +249,7 @@ export function startVoiceController(): () => void {
   };
 
   const handleEvent = async (e: { type: string; data: any }) => {
+    if (voice.focusedSession || e.data?.agent === 'gemini') return;
     const captured = epoch;
     if (!voice.state.prefs.enabled || voice.state.status === 'off') return;
     const p = voice.state.prefs.speak;
@@ -332,6 +335,7 @@ export function startVoiceController(): () => void {
     else voice.feedback('Nothing is running', false, true);
   };
   const keydown = (event: KeyboardEvent) => {
+    if (voice.focusedSession) return;
     const target = event.target as HTMLElement | null;
     if (event.code !== 'Space' || event.repeat || target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target?.tagName ?? '')) return;
     if (voice.state.status === 'speaking' || voice.state.said && voice.state.prefs.enabled) { event.preventDefault(); voice.stopSpeaking(); }

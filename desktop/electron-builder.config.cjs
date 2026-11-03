@@ -11,7 +11,8 @@ module.exports = {
   copyright: 'Personal use',
   electronVersion: '45.2.1',
   directories: { output: path.join(__dirname, '..', 'dist-desktop'), buildResources: path.join(__dirname, 'assets') },
-  files: ['main.mjs', 'lib.mjs', 'preload.cjs', 'splash.html', 'assets/**', 'package.json'],
+  files: ['main.mjs', 'lib.mjs', 'anywhere.mjs', 'focus.mjs', 'preload.cjs', 'splash.html', 'overlay-build/**', 'assets/**', 'package.json'],
+  beforePack: async () => (await import('./build-overlay.mjs')).buildOverlay(),
   // node_modules needs its own entry: electron-builder drops nested node_modules from generic copies.
   extraResources: [
     { from: stage, to: 'jarvis', filter: ['**/*', '!node_modules{,/**}'] },

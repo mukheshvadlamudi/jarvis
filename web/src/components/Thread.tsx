@@ -112,6 +112,9 @@ export function Turn({ run, live, approvals, conversationId, last, now, onAskOth
   const d = digest(run, live);
   const side = sideLabel(run);
   const agent = (run.agent === 'codex' ? 'codex' : 'claude') as AgentId;
+  // A spoken exchange from voice mode (Gemini Live): shown as Jarvis, with no agent-only actions.
+  const voiceTurn = run.agent === 'gemini';
+  const who = voiceTurn ? 'Jarvis (voice)' : agentName(agent);
   const [open, setOpen] = useState<boolean | null>(null);
   useEffect(() => { if (d.done) setOpen(null); }, [d.done]);
   const showWork = open ?? !d.done;
@@ -124,7 +127,7 @@ export function Turn({ run, live, approvals, conversationId, last, now, onAskOth
 
   const remember = async () => {
     try {
-      await post('/api/memory/remember', { text: d.answer.slice(0, 4000), source: `${agentName(agent)} on Ask` });
+      await post('/api/memory/remember', { text: d.answer.slice(0, 4000), source: `${who} on Ask` });
       toast('Saved to Inbox.md in your notes');
     } catch (err) {
       toastError(err);
@@ -151,8 +154,8 @@ export function Turn({ run, live, approvals, conversationId, last, now, onAskOth
       )}
       <div className={`turn-agent agent-${agent}`}>
         <header className="turn-head">
-          <span className={`dot${working ? ' live' : ''}`} style={{ color: `var(--agent-${agent})` }} />
-          <span className="turn-agent-name" tabIndex={0} title={[run.model, run.effort ? `${run.effort} effort` : '', run.route_reason].filter(Boolean).join(' · ')}>{side ? side.text : agentName(agent)}</span>
+          <span className={`dot${working ? ' live' : ''}`} style={{ color: voiceTurn ? 'var(--accent)' : `var(--agent-${agent})` }} />
+          <span className="turn-agent-name" tabIndex={0} title={[run.model, run.effort ? `${run.effort} effort` : '', run.route_reason].filter(Boolean).join(' · ')}>{side ? side.text : who}</span>
           <span className="turn-meta turn-time">{took}</span>
         </header>
 
@@ -196,7 +199,7 @@ export function Turn({ run, live, approvals, conversationId, last, now, onAskOth
           </section>
         ) : working ? (
           <div className="work-pending">
-            <Spinner size={12} /> {agentName(agent)} is starting
+            <Spinner size={12} /> {who} is starting
           </div>
         ) : null}
 
@@ -236,12 +239,12 @@ export function Turn({ run, live, approvals, conversationId, last, now, onAskOth
             <button className="btn ghost sm" onClick={() => void remember()} title="Save this answer to Inbox.md in your notes">
               <BookMarked size={14} strokeWidth={1.5} /> Remember
             </button>
-            {!side ? (
+            {!side && !voiceTurn ? (
               <button className="btn ghost sm" onClick={() => void second()} title={`${agentName(otherAgent(agent))} checks this answer (read-only)`}>
                 <Scale size={14} strokeWidth={1.5} /> Second opinion
               </button>
             ) : null}
-            {last && !side ? (
+            {last && !side && !voiceTurn ? (
               <button className="btn ghost sm" onClick={() => onAskOther(otherAgent(agent))} title={`Send your next message to ${agentName(otherAgent(agent))}; it gets this conversation`}>
                 <Repeat2 size={14} strokeWidth={1.5} /> Ask {agentName(otherAgent(agent))}
               </button>

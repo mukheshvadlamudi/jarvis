@@ -53,3 +53,19 @@ describe('switch agents when a plan runs out mid-task', () => {
     expect(runs(t.id)).toHaveLength(1);
   });
 });
+
+describe('after a spoken exchange', () => {
+  it('a typed follow-up is routed normally instead of failing on the voice brain', async () => {
+    ctx = makeCtx({ mockDelayMs: 1 });
+    const id = (await ctx.req('POST', '/api/conversations', { text: 'Plan my day', agent: 'claude' })).json.conversation.id;
+    await waitFor(() => ctx.s.tasks.get(id)?.status === 'done');
+    const v = await ctx.req('POST', `/api/conversations/${id}/voice-turns`, { user: 'What is on my calendar?', assistant: 'You have two meetings this afternoon.' });
+    expect(v.status).toBe(201);
+    const r = await ctx.req('POST', `/api/conversations/${id}/messages`, { text: 'Move the second one to Friday' });
+    expect(r.status).toBe(200);
+    await waitFor(() => ctx.s.tasks.get(id)?.status === 'done' && !ctx.s.orchestrator.isActive(id));
+    const last = ctx.s.orchestrator.runsForTask(id)[0];
+    expect(['claude', 'codex']).toContain(last.agent);
+    expect(last.prompt).toContain('Jarvis (voice): You have two meetings this afternoon.');
+  });
+});

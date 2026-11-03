@@ -11,7 +11,7 @@ const root = resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
 let browser: Browser;
 let bundle = '';
-const css = ['tokens', 'app', 'hud'].map((name) => readFileSync(resolve(root, 'styles', name + '.css'), 'utf8')).join('\n');
+const css = ['tokens', 'app', 'hud', 'ask'].map((name) => readFileSync(resolve(root, 'styles', name + '.css'), 'utf8')).join('\n');
 beforeAll(async () => {
   const path = root.replaceAll('\\', '/');
   const entry = `import {createElement as h} from 'react'; import {createRoot} from 'react-dom/client'; import {VoiceSettings} from '${path}/components/VoiceSettings.tsx'; import {VoiceDock} from '${path}/components/VoiceDock.tsx'; import {voice} from '${path}/voice/engine.ts'; voice.state = {...voice.state,status:'speaking',natural:'ready',progress:{voice:100,ears:100},turnStatus:'Smart Turn ready - on this device',said:'Your backups are safe. The latest copy was saved this morning.'}; window.voiceTest=voice; voice.onStopAgent=()=>{window.agentStopped=true}; createRoot(document.getElementById('root')).render(h('main',{style:{maxWidth:960,margin:'0 auto',padding:16,paddingBottom:240}},h(VoiceSettings),h(VoiceDock)));`;
@@ -46,6 +46,7 @@ describe('Voice controls in the browser', () => {
       try {
         await page.goto('http://voice.test/');
         await page.getByRole('button', { name: 'Speaker-safe', exact: true }).waitFor();
+        await page.getByRole('button', { name: 'Open voice panel · Speaking', exact: true }).click();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         const stop = page.getByRole('button', { name: 'Stop speaking', exact: true });
         const rect = await stop.boundingBox(); expect(rect?.width).toBeGreaterThanOrEqual(44); expect(rect?.height).toBeGreaterThanOrEqual(44);
@@ -59,6 +60,7 @@ describe('Voice controls in the browser', () => {
         expect(await page.getByRole('button', { name: 'Stop speaking', exact: true }).count()).toBe(0);
         await page.getByRole('button', { name: 'Mute mic', exact: true }).click();
         expect(await page.getByRole('button', { name: 'Unmute mic', exact: true }).getAttribute('aria-pressed')).toBe('true');
+        await page.getByText('Details', { exact: true }).click();
         await page.getByRole('button', { name: 'Stop agent', exact: true }).click();
         expect(await page.evaluate(() => (window as unknown as { agentStopped: boolean }).agentStopped)).toBe(true);
         expect(errors).toEqual([]);

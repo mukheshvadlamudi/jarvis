@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, Tray } from 'electron';
 import { layout, loginTerminalCommand, parseSse, readEnvFile, serverEnv } from './lib.mjs';
+import { installAnywhere } from './anywhere.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const paths = layout({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir: here, userData: app.getPath('userData') });
@@ -296,6 +297,8 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
+  await installAnywhere({ here, userData: app.getPath('userData'), origin: ORIGIN, token: TOKEN, packaged: app.isPackaged, showWindow,
+    onActiveChange: (active) => win?.webContents.send('jarvis:anywhere-active', active) });
   await win.loadURL(ORIGIN);
   void watchEvents();
 });

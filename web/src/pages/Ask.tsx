@@ -1,6 +1,8 @@
 import { History, MessageSquarePlus, Search } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AgentStrip } from '../components/AgentStrip.tsx';
+import { VoiceMode, VoiceUsage } from '../components/voice-mode/VoiceMode.tsx';
+import { rememberSetting } from '../voice/live/store.ts';
 import { Composer } from '../components/Composer.tsx';
 import type { ComposerHandle } from '../components/Composer.tsx';
 import { Turn } from '../components/Thread.tsx';
@@ -68,6 +70,20 @@ function HistoryList({ activeId, onPick }: { activeId: string | null; onPick: ()
  * steps while it works, then the answer streams in. Pick the agent, model and effort per message.
  */
 export default function Ask({ params }: PageProps) {
+  const [mode, setMode] = useState<'chat' | 'voice'>(() => {
+    try { return localStorage.getItem('jarvis.ask.mode') === 'voice' ? 'voice' : 'chat'; } catch { return 'chat'; }
+  });
+  const changeMode = (next: 'chat' | 'voice') => { rememberSetting('jarvis.ask.mode', next); setMode(next); };
+  useEffect(() => {
+    const open = () => changeMode('voice');
+    const key = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (event.key.toLowerCase() !== 'v' || event.repeat || event.metaKey || event.ctrlKey || event.altKey || target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')) return;
+      event.preventDefault(); setMode((current) => { const next = current === 'chat' ? 'voice' : 'chat'; rememberSetting('jarvis.ask.mode', next); return next; });
+    };
+    window.addEventListener('jarvis.open-voice', open); window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('jarvis.open-voice', open); window.removeEventListener('keydown', key); };
+  }, []);
   const id = params.id ?? null;
   const { data, error, live, reload } = useConversation(id);
   const agents = useApi<{ agents: Record<AgentId, AgentStatus>; threshold: number }>('/api/agents', ['agents.updated', 'usage.updated', 'run.started', 'run.finished']);
@@ -120,6 +136,7 @@ export default function Ask({ params }: PageProps) {
         <div className="ask-top">
           <h1 className="ask-conversation-title" title={data?.conversation.title}>{data?.conversation.title ?? 'Ask'}</h1>
           <nav aria-label="Conversation controls">
+            <div className="ask-mode" role="group" aria-label="Conversation mode">{(['chat', 'voice'] as const).map((value) => <button key={value} aria-pressed={mode === value} onClick={() => changeMode(value)}>{value === 'chat' ? 'Chat' : 'Voice'}</button>)}</div>
             <button ref={historyButton} className="btn ghost sm" aria-label="History" aria-haspopup="dialog" aria-expanded={panel === 'history'} onClick={() => setPanel('history')}><History size={16} strokeWidth={1.5} /><span className="ask-control-label">History</span></button>
             <button ref={agentsButton} className="btn ghost sm" aria-label="Agents" aria-haspopup="dialog" aria-expanded={panel === 'agents'} onClick={() => setPanel('agents')}>
               <span className="ask-agent-dots">{(['claude', 'codex'] as const).map((a) => <span key={a} title={`${agentName(a)}: ${agentState?.[a]?.state ?? 'checking'}`} className={`dot${agentState?.[a]?.state === 'busy' ? ' live' : ''}`} style={{ color: agentState?.[a]?.state === 'busy' ? 'var(--accent)' : agentState?.[a]?.state === 'signed_out' ? 'var(--danger)' : agentState?.[a]?.state === 'limited' ? 'var(--warning)' : 'var(--text-faint)' }} />)}</span><span className="ask-control-label">Agents</span>
@@ -128,7 +145,7 @@ export default function Ask({ params }: PageProps) {
           </nav>
         </div>
 
-        <div
+        {mode === 'voice' ? <VoiceMode conversationId={id} /> : <><div
           className="ask-thread"
           ref={scroller}
           onScroll={(e) => {
@@ -195,10 +212,11 @@ export default function Ask({ params }: PageProps) {
             onStop={() => void stop()}
           />
         </div>
+        </>}
       </section>
       {panel ? (
         <Popover title={panel === 'history' ? 'History' : 'Agents'} anchor={panel === 'history' ? historyButton.current : agentsButton.current} search={panel === 'history'} onClose={() => setPanel(null)}>
-          {panel === 'history' ? <HistoryList activeId={id} onPick={() => setPanel(null)} /> : <AgentStrip agents={agentState} threshold={agents.data?.threshold ?? 85} picked="" onPick={(a) => { setPanel(null); requestAnimationFrame(() => composer.current?.pick(a)); }} onRefreshed={setAgentOverride} />}
+          {panel === 'history' ? <HistoryList activeId={id} onPick={() => setPanel(null)} /> : <><AgentStrip agents={agentState} threshold={agents.data?.threshold ?? 85} picked="" onPick={(a) => { setPanel(null); requestAnimationFrame(() => composer.current?.pick(a)); }} onRefreshed={setAgentOverride} /><VoiceUsage /></>}
         </Popover>
       ) : null}
     </div>

@@ -51,6 +51,22 @@ function titleOf(text: string): string {
 export function registerConversationRoutes(app: Hono, s: Services): void {
   const uploadsDir = join(s.env.dataDir, 'uploads');
 
+  // Voice-only persistence: this never starts an agent or changes a running task's state.
+  app.post('/api/conversations/:id/voice-turns', async (c) => {
+    const b = await body<{ user?: unknown; assistant?: unknown }>(c);
+    if (!b || typeof b.user !== 'string' || typeof b.assistant !== 'string' || !b.user.trim() || !b.assistant.trim() || b.user.length > 20000 || b.assistant.length > 20000) return bad(c, 'Send user and assistant text, each between 1 and 20000 characters.');
+    const task = c.req.param('id') === 'new'
+      ? s.tasks.create({ title: titleOf(b.user), mode: 'chat', run: false })
+      : s.tasks.get(c.req.param('id'));
+    if (!task || task.mode !== 'chat') return bad(c, 'No conversation with that id.', 404);
+    const id = newId('r'); const at = nowIso();
+    run(s.db, `INSERT INTO runs (id, task_id, agent, cwd, started_at, ended_at, status, purpose, visibility, owner_text, answer)
+      VALUES (?, ?, 'gemini', '', ?, ?, 'done', 'user_reply', 'conversation', ?, ?)`, id, task.id, at, at, b.user.trim(), b.assistant.trim());
+    run(s.db, 'UPDATE tasks SET updated_at = ? WHERE id = ?', at, task.id);
+    s.bus.publish('run.finished', { id, task_id: task.id, agent: 'gemini', status: 'done', purpose: 'user_reply', visibility: 'conversation', answer: b.assistant.trim() });
+    return c.json({ runId: id, conversationId: task.id }, 201);
+  });
+
   /** "Ask both": the other agent answers the same message beside the main answer (read-only). */
   const askOther = async (task: Task, mainAgent: AgentId, text: string, b: MessageBody, withHistory: boolean) => {
     const second = other(mainAgent);
