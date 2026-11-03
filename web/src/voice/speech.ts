@@ -27,7 +27,7 @@ export function toSpeech(text: string, maxChars = 700): string {
 
 /** Split into sentences so playback can start after the first one is synthesised. */
 export function sentences(text: string): string[] {
-  const parts = text.replace(/\s+/g, ' ').match(/[^.!?;]+[.!?;]*\s*/g) ?? [text];
+  const parts = Array.from(new Intl.Segmenter('en', { granularity: 'sentence' }).segment(text.replace(/\s+/g, ' ')), (s) => s.segment);
   const out: string[] = [];
   for (const p of parts) {
     const t = p.trim();
@@ -38,7 +38,7 @@ export function sentences(text: string): string[] {
   }
   // A long opening sentence is split at its first natural pause after a few words.
   if (out[0] && out[0].length > 60) {
-    const m = /^(.{16,}?[,:\u2014–-])\s+(.+)$/.exec(out[0]);
+    const m = /^(.{16,}?[,;:\u2014–])\s+(.+)$/.exec(out[0]);
     if (m) out.splice(0, 1, m[1], m[2]);
   }
   return out.length ? out : [text];

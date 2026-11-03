@@ -3,6 +3,12 @@ import { parseUtterance, stripWake } from './intents.ts';
 import { answerToSpeech, sentences, toSpeech } from './speech.ts';
 
 describe('speech text', () => {
+  it('keeps decimals, filenames and long unbroken sentences together', () => {
+    expect(sentences('Version 2.5 writes backup.zip safely before the service restarts.')).toEqual(['Version 2.5 writes backup.zip safely before the service restarts.']);
+    const text = 'This long sentence explains how backups are restored safely without interrupting other tasks or losing your most recent changes';
+    expect(sentences(text)).toEqual([text]);
+    expect(sentences('The backup finished successfully; the database is now ready for the scheduled maintenance window.')[0]).toBe('The backup finished successfully;');
+  });
   it('reads markdown naturally', () => {
     const s = toSpeech('# Result\n\n- Fixed **auth** bug ([PR](https://x.y/1)), 2 files (+49 −4)\n```ts\nconst a=1\n```\nBranch jarvis/t_3fq9k2m-token-refresh ready.');
     expect(s).toBe('Result. Fixed auth bug (PR), 2 files (plus 49 minus 4). (code omitted). Branch the Jarvis branch ready.');

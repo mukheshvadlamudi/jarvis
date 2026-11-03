@@ -8,6 +8,7 @@ import { useApi, useMedia, useNow } from '../lib/hooks.ts';
 import { navigate, setQuery, useLocation } from '../lib/router.ts';
 import { toast, toastError } from '../lib/toast.ts';
 import type { Project, Task, TaskStatus } from '../lib/types.ts';
+import { Markdown } from '../lib/markdown.tsx';
 
 type ColumnKey = 'inbox' | 'queued' | 'running' | 'needs_you' | 'done';
 const COLUMNS: Array<{ key: ColumnKey; label: string; statuses: TaskStatus[]; hint: string }> = [
@@ -339,7 +340,7 @@ function TaskSheet({ t, projects, onClose }: { t: Task; projects: Project[]; onC
           <div className="field-label" style={{ marginBottom: 6 }}>
             Result
           </div>
-          <p style={{ fontSize: 13 }}>{t.result_summary}</p>
+          <Markdown source={t.result_summary} />
         </div>
       ) : null}
       {canRun ? (

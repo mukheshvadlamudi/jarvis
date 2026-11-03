@@ -13,13 +13,19 @@ export type Intent =
   | { kind: 'task'; text: string }
   | { kind: 'conversation'; text: string };
 
-const WAKE = /^\s*(?:hey|ok|okay|hi|yo)?[\s,]*(?:jarvis|jarvis's|travis|jervis|javis)\b[\s,.!?:-]*/i;
+const WAKE = /^(?:(?:hey|ok|okay|so|um|uh|hi|yo|please)\b[\s\p{P}\p{S}]*){0,3}(?:jarvis(?:'s)?|jervis|javis|jarvas|jarviss|jarvi|travis|charvis|jarbis|jarves|jar[\s\p{P}]+vis)\b[\s\p{P}\p{S}]*/iu;
 const clean = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, ' ').replace(/\s+/g, ' ').trim();
 
-/** Remove a leading wake word; returns null when it is missing. */
+export function isNoise(text: string): boolean {
+  const words = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  return !words || /^(you|thank you|blank audio|music|silence|inaudible)$/.test(words) || text.replace(/[^\p{L}]/gu, '').length < 2;
+}
+
+/** A wake word may follow up to three fillers; preserve the command verbatim. */
 export function stripWake(text: string): string | null {
-  const m = WAKE.exec(text);
-  return m ? text.slice(m[0].length).trim() : null;
+  const input = text.replace(/^[\s\p{P}\p{S}]+/u, '');
+  const m = WAKE.exec(input);
+  return m ? input.slice(m[0].length).trim() : null;
 }
 
 /**
@@ -28,11 +34,12 @@ export function stripWake(text: string): string | null {
  */
 export function parseUtterance(raw: string, opts: { requireWake: boolean; awaiting: boolean }): Intent {
   const text = raw.trim();
-  if (!text || /^\[?(blank_audio|music|silence|inaudible)\]?$/i.test(text) || text.replace(/[^\p{L}]/gu, '').length < 2) return { kind: 'ignore' };
+  if (isNoise(text)) return { kind: 'ignore' };
   const stripped = stripWake(text);
   if (stripped === null && opts.requireWake && !opts.awaiting) return { kind: 'ignore' };
   const body = stripped ?? text;
   if (!body) return { kind: 'wake' };
+  if (isNoise(body)) return { kind: 'ignore' };
   const ask = /^ask\s+([\s\S]+)/i.exec(body);
   if (ask) return { kind: 'conversation', text: ask[1].trim() };
   const c = clean(body);

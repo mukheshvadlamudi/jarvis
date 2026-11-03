@@ -4,7 +4,7 @@ import { subscribeLive } from '../lib/live.ts';
 import { toast } from '../lib/toast.ts';
 import type { Approval, Task, UsageState } from '../lib/types.ts';
 import { voice } from './engine.ts';
-import { parseUtterance } from './intents.ts';
+import { isNoise, parseUtterance, stripWake } from './intents.ts';
 import { answerToSpeech, toSpeech } from './speech.ts';
 
 const FOLLOW_UP_MS = 8000;
@@ -111,9 +111,25 @@ export function startVoiceController(): () => void {
   }, 3000);
   if (voice.state.prefs.enabled && isLeader()) void voice.start();
 
+  const conversation = async (text: string) => {
+    voice.feedback('Opening a conversation\u2026');
+    const r = await post<{ conversation: Task }>('/api/conversations', { text });
+    lastCreated = r.conversation.id;
+    navigate('/c/' + r.conversation.id);
+  };
+  voice.onUseHeard = async (text) => {
+    try { await conversation(text); }
+    catch (err) { voice.feedback('Could not open conversation: ' + (err as Error).message); }
+  };
+
   voice.onUtterance = async (text) => {
     const intent = parseUtterance(text, { requireWake: voice.state.prefs.wakeWord, awaiting: voice.state.awaiting });
-    if (intent.kind === 'ignore') return;
+    if (intent.kind === 'ignore') {
+      const noise = isNoise(text) || (stripWake(text) !== null && isNoise(stripWake(text)!));
+      voice.feedback(noise ? 'Not sure what you meant' : 'Heard \u201c' + text + '\u201d \u00b7 start with \u201cJarvis\u201d', !noise, true);
+      return;
+    }
+    voice.feedback(intent.kind === 'task' || intent.kind === 'conversation' ? 'Preparing request\u2026' : 'Command recognised');
     voice.setAwaiting(false);
     try {
       switch (intent.kind) {
@@ -156,14 +172,12 @@ export function startVoiceController(): () => void {
           await post(`/api/tasks/${lastCreated}/cancel`);
           return reply('Cancelled.');
         }
-        case 'conversation': {
-          const r = await post<{ conversation: Task }>('/api/conversations', { text: intent.text });
-          lastCreated = r.conversation.id;
-          navigate(`/c/${r.conversation.id}`);
+        case 'conversation':
+          await conversation(intent.text);
           return;
-        }
         case 'task': {
           const preview = await post<{ agent: string | null; type: string }>('/api/tasks/preview', { text: intent.text });
+          voice.feedback('Sending to ' + agentName(preview.agent) + '\u2026');
           const r = await post<{ task: Task }>('/api/tasks', { title: intent.text });
           lastCreated = r.task.id;
           toast(`Queued by voice: “${r.task.title}”`, { kind: 'success', action: { label: 'Open', run: () => navigate(`/tasks/${r.task.id}`) } });
@@ -172,6 +186,7 @@ export function startVoiceController(): () => void {
         }
       }
     } catch (err) {
+      voice.feedback('Voice command failed: ' + (err as Error).message);
       reply(`Sorry, that failed: ${(err as Error).message}`);
     }
   };
@@ -256,5 +271,6 @@ export function startVoiceController(): () => void {
     window.removeEventListener('beforeunload', release);
     release();
     voice.onUtterance = null;
+    voice.onUseHeard = null;
   };
 }
