@@ -22,15 +22,16 @@ const defaultFactory: GenAiFactory = async (apiKey) => {
 };
 
 /**
- * Prefer native-audio Live models (natural voice, built-in barge-in), newest first; then any
- * model that supports bidiGenerateContent.
+ * The newest general-purpose Live model: highest version first, stable before preview, native
+ * audio as a tie-break. Special-purpose Live models (transcribe, translate, robotics, extended
+ * thinking — slower to answer) are never picked for conversation.
  */
 export function pickLiveModel(names: Array<{ name: string; actions: string[] }>): string | null {
-  const live = names.filter((m) => m.actions.includes('bidiGenerateContent') || /live/i.test(m.name));
+  const live = names.filter((m) => (m.actions.includes('bidiGenerateContent') || /live|native-audio/i.test(m.name)) && !/transcribe|translate|robotics|thinking|tts/i.test(m.name));
   if (!live.length) return null;
-  const score = (n: string) => (/native-audio/.test(n) ? 2 : 0) + (/preview/.test(n) ? 0 : 0.5);
   const version = (n: string) => Number(/gemini-(\d+(?:\.\d+)?)/.exec(n)?.[1] ?? 0);
-  live.sort((a, b) => score(b.name) - score(a.name) || version(b.name) - version(a.name) || b.name.localeCompare(a.name));
+  const rank = (n: string) => (/preview/.test(n) ? 0 : 2) + (/native-audio/.test(n) ? 1 : 0);
+  live.sort((x, y) => version(y.name) - version(x.name) || rank(y.name) - rank(x.name) || y.name.localeCompare(x.name));
   return live[0].name.replace(/^models\//, '');
 }
 

@@ -30,8 +30,12 @@ describe('Gemini Live voice brain', () => {
         { name: 'models/gemini-2.5-flash-native-audio-preview', actions: ['bidiGenerateContent'] },
         { name: 'models/gemini-3.1-flash-live-preview', actions: ['bidiGenerateContent'] },
         { name: 'models/gemini-3.1-flash-native-audio-preview', actions: ['bidiGenerateContent'] },
+        { name: 'models/gemini-3.8-live', actions: ['bidiGenerateContent'] },
+        { name: 'models/gemini-3.8-live-extended-thinking', actions: ['bidiGenerateContent'] },
+        { name: 'models/gemini-3.5-transcribe-live', actions: ['bidiGenerateContent'] },
+        { name: 'models/gemini-robotics-er-2-streaming-preview', actions: ['bidiGenerateContent'] },
       ]),
-    ).toBe('gemini-3.1-flash-native-audio-preview');
+    ).toBe('gemini-3.8-live');
     expect(pickLiveModel([{ name: 'models/gemini-2.5-flash', actions: ['generateContent'] }])).toBeNull();
   });
 
@@ -40,7 +44,7 @@ describe('Gemini Live voice brain', () => {
     const calls: Array<Record<string, unknown>> = [];
     const live = new GeminiLive(ctx.s, fakeAi(calls));
     const t = await live.token();
-    expect(t).toMatchObject({ token: 'auth_tokens/eph-123', model: 'gemini-3.1-flash-native-audio-preview' });
+    expect(t).toMatchObject({ token: 'auth_tokens/eph-123', model: 'gemini-3.1-flash-native-audio-preview' }); // newest in the fake list
     expect(calls[0]).toMatchObject({ uses: 1 });
     expect(JSON.stringify(t)).not.toContain('AIza');
   });
