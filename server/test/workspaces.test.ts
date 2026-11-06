@@ -24,6 +24,7 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     const files: Record<string, string> = { '/node.xml': 'node-blog.rss.xml', '/hono.atom': 'hono-releases.atom.xml' };
     if (req.url === '/status') return res.end(page);
+    if (req.url === '/oversized') return res.end(Buffer.alloc(2_000_001));
     if (req.url === '/broken') {
       res.statusCode = 500;
       return res.end('nope');
@@ -74,6 +75,7 @@ describe('feeds', () => {
     expect(atom.items[0]).toMatchObject({ title: 'v4.13.17', url: 'https://github.com/honojs/hono/releases/tag/v4.13.17' });
     expect(atom.items[0].summary).toBe("What's Changed fix(streaming): close SSE streams on client abort");
     expect(plainText('<p>a &amp; b</p>')).toBe('a & b');
+    expect(plainText('broken &#99999999999; &#xd800;')).toBe('broken � �');
   });
 
   it('adds sources, dedupes items, diffs plain pages, records errors and marks seen after a digest', async () => {
@@ -98,6 +100,13 @@ describe('feeds', () => {
     expect(task.body).toContain('Node.js 24.11.1 (LTS) — security release');
     await waitFor(() => ctx.s.tasks.get(task.id)?.status === 'done');
     await waitFor(() => (ctx.s.db.prepare('SELECT COUNT(*) AS n FROM feed_items WHERE seen = 0').get() as { n: number }).n === 0);
+  });
+
+  it('rejects feed bodies above the download limit', async () => {
+    ctx = makeCtx();
+    const { json } = await ctx.req('POST', '/api/feeds', { url: `${base}/oversized` });
+    expect(json.source.last_error).toBe('Feed exceeds the 2 MB download limit');
+    expect(workspacesOf(ctx.s).feeds.items()).toEqual([]);
   });
 });
 

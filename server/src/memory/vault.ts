@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync, watch } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import type { Db } from '../db/index.ts';
@@ -86,6 +86,13 @@ export class VaultIndex {
     const abs = resolve(this.root, clean);
     const r = relative(this.root, abs);
     if (r.startsWith('..') || isAbsolute(r)) throw new Error('path is outside the vault');
+    let entry = this.root;
+    for (const part of r.split(sep).filter(Boolean)) {
+      entry = join(entry, part);
+      const stat = lstatSync(entry, { throwIfNoEntry: false });
+      if (!stat) break;
+      if (stat.isSymbolicLink()) throw new Error('symbolic links inside the vault are not supported');
+    }
     return abs;
   }
 

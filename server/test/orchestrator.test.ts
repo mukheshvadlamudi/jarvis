@@ -164,7 +164,12 @@ describe('access token', () => {
     expect((await ctx.req('GET', '/api/health')).status).toBe(200);
     const ok = await ctx.app.request('/api/tasks', { headers: { authorization: 'Bearer tok' } });
     expect(ok.status).toBe(200);
-    expect((await ctx.app.request('/api/tasks?token=tok')).status).toBe(200);
+    expect((await ctx.app.request('/api/tasks?token=tok')).status).toBe(401);
+    expect((await ctx.app.request('/api/tasks?token=tok', { method: 'POST' })).status).toBe(401);
+    expect((await ctx.app.request('/api/tasks/missing/outputs/raw?token=tok')).status).toBe(404);
+    const stream = await ctx.app.request('/api/stream?token=tok');
+    expect(stream.status).toBe(200);
+    await stream.body?.cancel();
   });
 });
 
@@ -184,6 +189,7 @@ describe('local origin guard', () => {
     expect((await post('http://127.0.0.1:4317/api/tasks', { origin: 'https://evil.example' })).status).toBe(403);
     expect((await post('http://127.0.0.1:4317/api/tasks', { 'sec-fetch-site': 'cross-site' })).status).toBe(403);
     expect((await post('http://127.0.0.1:4317/api/tasks', { origin: 'null' })).status).toBe(403);
+    expect((await post('http://127.0.0.1:4317/api/tasks', { origin: 'http://127.0.0.1:8080' })).status).toBe(403);
     expect((await post('http://127.0.0.1:4317/api/tasks/preview', { origin: 'http://127.0.0.1:4317' })).status).toBe(200);
   });
 

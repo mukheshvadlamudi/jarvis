@@ -69,8 +69,12 @@ describe('claude runner (SDK mocked)', () => {
     const { s } = sink();
     const o = buildClaudeOptions({ ...input, sandbox: 'read-only' }, s, new AbortController(), {});
     expect(o.permissionMode).toBe('default');
-    const r = await o.canUseTool!('Write', { file_path: '/work/t_1/a.md' }, { signal: new AbortController().signal, toolUseID: 'x' } as never);
-    expect(r?.behavior).toBe('deny');
+    const opts = { signal: new AbortController().signal, toolUseID: 'x' } as never;
+    expect(o.disallowedTools).toContain('Bash');
+    expect(await o.canUseTool!('Write', { file_path: '/work/t_1/a.md' }, opts)).toMatchObject({ behavior: 'deny' });
+    expect(await o.canUseTool!('Bash', { command: 'printf changed > a.md' }, opts)).toMatchObject({ behavior: 'deny' });
+    expect(await o.canUseTool!('Agent', { prompt: 'Edit a.md' }, opts)).toMatchObject({ behavior: 'deny' });
+    expect(await o.canUseTool!('Read', { file_path: '/work/t_1/a.md' }, opts)).toMatchObject({ behavior: 'allow' });
   });
 
   it('maps SDK messages to normalized events and totals', async () => {

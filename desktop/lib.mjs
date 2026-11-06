@@ -26,7 +26,7 @@ export function readEnvFile(path) {
 /** Environment for the server child: no API keys, Electron acting as plain Node. */
 export function serverEnv(base, extra) {
   const env = { ...base, ...extra, ELECTRON_RUN_AS_NODE: '1' };
-  for (const k of BILLING_KEYS) delete env[k];
+  for (const k of Object.keys(env)) if (BILLING_KEYS.includes(k.toUpperCase())) delete env[k];
   return env;
 }
 

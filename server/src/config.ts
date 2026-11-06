@@ -75,6 +75,7 @@ export interface Env {
   /** Set when the vault is a working copy of fixtures/vault (mock mode never writes the fixtures). */
   vaultSource: string | null;
   runner: 'mock' | 'real';
+  demo: boolean;
   dataDir: string;
   codexHome: string;
   claudeHome: string;
@@ -120,6 +121,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     vault,
     vaultSource,
     runner,
+    demo: source.JARVIS_DEMO === '1',
     dataDir,
     codexHome,
     claudeHome,

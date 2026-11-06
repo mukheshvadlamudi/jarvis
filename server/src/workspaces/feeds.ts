@@ -29,9 +29,10 @@ export interface ParsedItem {
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
 export function decodeEntities(s: string): string {
+  const decode = (n: number) => n > 0 && n <= 0x10ffff && (n < 0xd800 || n > 0xdfff) ? String.fromCodePoint(n) : '\uFFFD';
   return s
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (_, n) => decode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => decode(parseInt(n, 16)))
     .replace(/&([a-z]+);/gi, (m, n) => ENTITIES[n.toLowerCase()] ?? m);
 }
 
@@ -97,12 +98,30 @@ export function detectKind(url: string, body: string): FeedSource['kind'] {
   return 'page';
 }
 
-export type Fetcher = (url: string, init?: { signal?: AbortSignal; headers?: Record<string, string> }) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>;
+async function feedText(response: Response): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return text + decoder.decode();
+      bytes += value.byteLength;
+      if (bytes > 2_000_000) throw new Error('Feed exceeds the 2 MB download limit');
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
 
 /** RSS/Atom/GitHub releases and plain pages (hash-diff). Plain `fetch`, no LLM. */
 export class Feeds {
   private s: Services;
-  fetcher: Fetcher = (url, init) => fetch(url, init);
+  fetcher: typeof fetch = (url, init) => fetch(url, init);
   private timer: NodeJS.Timeout | null = null;
 
   constructor(s: Services) {
@@ -142,7 +161,11 @@ export class Feeds {
     let name = input.name?.trim() || '';
     try {
       const res = await this.fetcher(url, { signal: AbortSignal.timeout(15_000), headers: { 'user-agent': 'Jarvis/0.1 (+personal feed reader)' } });
-      const body = await res.text();
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const body = await feedText(res);
       kind = detectKind(url, body);
       if (!name) name = (kind === 'page' ? /<title>([^<]*)<\/title>/i.exec(body)?.[1]?.trim() : parseFeed(body).title) || new URL(url).hostname;
     } catch {
@@ -160,8 +183,11 @@ export class Feeds {
     const now = nowIso();
     try {
       const res = await this.fetcher(src.url, { signal: AbortSignal.timeout(20_000), headers: { 'user-agent': 'Jarvis/0.1 (+personal feed reader)' } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.text()).slice(0, 2_000_000);
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const body = await feedText(res);
       let added = 0;
       if (src.kind === 'page') {
         const text = plainText(body, 200_000);

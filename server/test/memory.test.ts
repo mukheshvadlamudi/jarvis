@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { unifiedDiff } from '../src/memory/diff.ts';
@@ -52,6 +52,14 @@ describe('vault index', () => {
     const typed = await ctx.req('GET', '/api/memory/search?q=Umami&type=research');
     expect(typed.json.results.map((r: { path: string }) => r.path)).toEqual(['Research/2026-11-01-privacy-analytics.md']);
     expect((await ctx.req('GET', '/api/memory/note?path=../../etc/passwd')).status).toBe(400);
+  });
+
+  it('rejects vault reads and writes through linked directories', async () => {
+    ctx = makeCtx();
+    const { vault } = memoryOf(ctx.s);
+    symlinkSync(FIXTURE_VAULT, join(vault.root, 'Linked'), 'junction');
+    expect((await ctx.req('GET', '/api/memory/note?path=Linked/CORE.md')).status).toBe(400);
+    expect(() => vault.resolve('Linked/new-note.md')).toThrow('symbolic links');
   });
 
   it('picks up edits through the watcher', async () => {

@@ -34,6 +34,7 @@ export function registerCoreRoutes(app: Hono, s: Services): void {
     c.json({
       ok: true,
       runner: s.env.runner,
+      demo: s.env.demo,
       uptimeSec: Math.round((Date.now() - started) / 1000),
       memoryMb: Math.round(process.memoryUsage().rss / 1048576),
       activeRuns: s.orchestrator.activeCount(),

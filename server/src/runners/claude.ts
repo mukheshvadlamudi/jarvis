@@ -35,6 +35,7 @@ export interface ClaudeRunnerDeps {
 }
 
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const READ_ONLY_DENIED = [...WRITE_TOOLS, 'Bash', 'PowerShell', 'shell', 'command_execution', 'Agent', 'Task'];
 
 async function loadQuery(): Promise<QueryFn> {
   const sdk = await import('@anthropic-ai/claude-agent-sdk');
@@ -98,7 +99,7 @@ export function buildClaudeOptions(input: RunInput, sink: RunEventSink, abortCon
   const readOnly = input.sandbox === 'read-only';
 
   const policyFor = (toolName: string, toolInput: Record<string, unknown>) => {
-    if (readOnly && WRITE_TOOLS.has(toolName)) {
+    if (readOnly && READ_ONLY_DENIED.includes(toolName)) {
       return { level: 'block' as const, kind: 'read_only', reason: 'this task runs read-only' };
     }
     // A click, keystroke, script or batch can submit outward data. Gate all browser mutations;
@@ -150,6 +151,7 @@ export function buildClaudeOptions(input: RunInput, sink: RunEventSink, abortCon
     resume: input.resumeSessionId,
     abortController,
     permissionMode: readOnly ? 'default' : 'acceptEdits',
+    ...(readOnly ? { disallowedTools: READ_ONLY_DENIED } : {}),
     canUseTool,
     hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
     mcpServers,

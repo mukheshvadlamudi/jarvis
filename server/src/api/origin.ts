@@ -27,8 +27,7 @@ export function localOriginGuard(accessToken: string | null): MiddlewareHandler 
     if (!SAFE_METHODS.has(c.req.method)) {
       const origin = c.req.header('origin');
       const site = c.req.header('sec-fetch-site');
-      const originHost = origin && origin !== 'null' ? hostnameOf(origin) : origin === 'null' ? 'null' : null;
-      if ((originHost && !LOOPBACK.has(originHost)) || site === 'cross-site') {
+      if ((origin !== undefined && origin !== new URL(c.req.url).origin) || site === 'cross-site') {
         return c.json({ error: 'forbidden', message: 'Cross-site requests to Jarvis are refused.' }, 403);
       }
     }
