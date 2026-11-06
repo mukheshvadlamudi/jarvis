@@ -1,67 +1,140 @@
 # Jarvis
 
-Personal command centre that runs your work — coding, research, email/admin, updates, routines — through the official **Claude Code** and **Codex** agents on your existing **Claude Pro** and **ChatGPT Plus** plans. No API keys, ever.
+A local command centre for work carried out by Claude Code and Codex. Capture a task, route it to an agent, follow its progress, and keep results connected to projects and a Markdown memory vault.
 
-See [SPEC.md](SPEC.md) for the design, [docs/DESIGN.md](docs/DESIGN.md) for the UI system and [docs/decisions.md](docs/decisions.md) for choices made while building. Build rules for agents are in [CLAUDE.md](CLAUDE.md). Screenshots of every page (phone and desktop, dark and light) are in [docs/screenshots](docs/screenshots).
+Jarvis combines a task board, streamed conversations, approval workflows, schedules, and optional Telegram access in a single-user application. It uses the official agent SDKs rather than implementing its own coding harness.
 
-## Requirements
-- Node 24+ and git
-- A Claude Pro/Max and a ChatGPT Plus/Pro subscription (the Claude Code and Codex CLIs ship inside Jarvis — just log in once)
-- Optional: `gh` CLI (for approval-gated "Open PR"), a Telegram bot
+**Status:** active personal project. Start with the mock demo and a sample vault before connecting your own files or agent accounts. No project license has been selected yet.
 
-Jarvis removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` and `CODEX_API_KEY` from every agent it starts, so usage always comes from your plans.
+![Jarvis conversation interface](docs/screenshots/ask-1440-dark.png)
 
-## Desktop app
-Download the installer for Windows, macOS or Linux from **Releases** (or the latest *Desktop app* Actions run) and open **Jarvis** — no Node install needed. It lives in the tray, sends native notifications for approvals, and `Ctrl+Shift+J` captures a task from anywhere. Run it from source with `npm run desktop`; build installers with `npm run package:win|mac|linux`. Details: [docs/INSTALL.md](docs/INSTALL.md).
+## Try the demo
 
-## Run (one click, from source)
-- **Windows:** double-click `start-jarvis.cmd` · **macOS:** `start-jarvis.command` · **Linux:** `./start-jarvis.sh`
-- Or `npm run app` (add `--demo`, or `npm run demo`, to try it without your plans).
+You need Node.js 24+ and Git. No agent login or model API key is required for the mock demo.
 
-The launcher installs and builds on first run, offers the Claude/Codex logins (`npm run login:claude`, `npm run login:codex`), starts Jarvis and opens the **Setup** page, which connects your vault, code folders, skills, routines and Telegram. Then install it as an app from the browser. Full guide for you or anyone you share it with: [docs/INSTALL.md](docs/INSTALL.md).
-
-Manual: `npm install && cp .env.example .env && npm start`.
-Development (hot reload): `npm run dev` → API on :4317, UI on http://127.0.0.1:5173.
-
-Try everything without touching your plans: `JARVIS_RUNNER=mock` gives scripted runs plus believable demo data (a copy of `fixtures/vault`, a demo git repo, feeds, schedules, approvals).
-
-## First run checklist (real logins)
-1. `npm run smoke:claude` and `npm run smoke:codex` — one tiny read-only run each; prints session, tokens and plan-usage readings.
-2. Memory → Health: review the migration proposal for your vault (Jarvis never moves files).
-3. Skills → Preview sync, then Sync now (copies to `~/.claude/skills` and `~/.codex/skills`; only skills Jarvis created are ever touched).
-4. Projects → add your repos (local path) so coding tasks run in `.jarvis-worktrees/<task>`.
-5. Schedules → turn on the Morning brief when you're happy.
-6. Optional: Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`, `JARVIS_PUBLIC_URL`).
-7. Optional remote access (phone over Tailscale): set both `JARVIS_BIND` and `JARVIS_ACCESS_TOKEN`.
-
-## What's inside
-| Page | What it does |
-|---|---|
-| Ask | Conversations with live thinking and steps; per-message agent, model and effort picker; attachments; Ask both, Second opinion and Remember; searchable history |
-| Connectors | Manage each agent's MCP connectors through its own CLI, from the owner UI |
-| Overview | Command bar (dictation, live type/project/agent preview), Needs you, Running now, plan usage, today's routines, follow-ups |
-| Board | Inbox → Queued → Running → Needs you → Done; drag or `[`/`]`; run with Claude or Codex |
-| Run view | Live transcript, tool calls, file changes, consults between agents, context inspector, tokens; Outputs panel (preview, download, save to vault); hand off to the other agent for review or to continue; Stop / follow-up / run again |
-| Approvals | Everything outward-facing waits here (and in Telegram) |
-| Research | Reports saved to `Research/` with sources; follow-ups continue the same session |
-| Updates | RSS/Atom/GitHub releases and page-change feeds; daily digest |
-| Projects | Repos, CLAUDE.md/AGENTS.md, Jarvis worktrees with diff stats, approval-gated PRs, clean-up |
-| People | Follow-ups and open threads from `People/*.md` |
-| Memory | Vault search and reader, memory proposals with diffs, size caps, migration proposal |
-| Skills | Vault skills, sync to Claude/Codex, agent-proposed skills |
-| Schedules | Cron schedules and built-in routines with missed-run catch-up |
-| Usage | Real plan usage from Claude Code and Codex session logs, per-day/per-type tokens, routing decisions |
-| Settings | Routing rules, agent model and reasoning effort, collaboration, concurrency, budgets, voice, Telegram, theme |
-| Voice | Hands-free: say “Jarvis, …”. Kokoro speaks approvals and results, Whisper listens. All on your device, no credits |
-
-**Agents use their own harnesses.** Claude tasks run in the real Claude Code (via the Claude Agent SDK), and Codex tasks run in the real Codex CLI (via the Codex SDK). Each keeps its own tools, project instructions and skills. Jarvis only routes the work, adds memory context, enforces approvals, and lets the two agents consult each other or hand work off.
-
-## Tests
+```sh
+git clone https://github.com/mukheshvadlamudi/jarvis.git
+cd jarvis
+npm install
+npm run demo
 ```
-npm test            # server + web, always with JARVIS_RUNNER=mock (no real agent calls)
+
+The launcher builds the web interface, creates local configuration on first run, and starts Jarvis at [http://127.0.0.1:4317](http://127.0.0.1:4317). Demo mode uses scripted agent runs and a working copy of the sample vault.
+
+The launcher also supports `npm run app`, or the platform scripts `start-jarvis.cmd`, `start-jarvis.command`, and `start-jarvis.sh`. See the [installation guide](docs/INSTALL.md) for desktop packaging and setup details.
+
+## Connect real agents
+
+Real runs require accounts that can authenticate with the bundled Claude Code and Codex tools. Availability and usage limits depend on your accounts. Jarvis is configured to use CLI logins and strips model API-key variables from spawned agent environments.
+
+```sh
+npm run login:claude
+npm run login:codex
+npm run app
+```
+
+If you first ran the demo, change `JARVIS_RUNNER=mock` to `JARVIS_RUNNER=real` in `.env` before launching the real app. The demo flag overrides this setting only for that demo launch.
+
+Use Setup to select your vault and project folders. Begin with a disposable project to understand the agent permissions, worktrees, and approval behavior before assigning work on important files.
+
+## What you can do
+
+| Workspace | Purpose |
+| --- | --- |
+| Ask | Streamed conversations, attachments, agent selection, second opinions, and handoffs |
+| Board and run view | Queue tasks, inspect tool activity and changes, follow up, or cancel |
+| Approvals | Review actions that the application routes through its approval policy |
+| Projects | Register local repositories and inspect task worktrees and changes |
+| Memory and skills | Search a Markdown vault, review proposed edits, and sync selected skills |
+| Schedules and updates | Run routines and collect RSS, release, and page-change updates |
+| Usage | Inspect available usage readings and run token totals |
+| People | Track follow-ups from vault notes |
+| Voice | Optional local speech components and hands-free interaction |
+| Telegram | Optional task capture and approval notifications |
+
+## Architecture
+
+```text
+React web UI / Electron shell / Telegram
+                    ↓
+          Hono API + task scheduler
+                    ↓
+        routing / approvals / memory
+              ↙                ↘
+     Claude Agent SDK       Codex SDK
+              ↘                ↙
+        local projects + Markdown vault
+                    ↓
+         SQLite + streamed run events
+```
+
+| Path | Purpose |
+| --- | --- |
+| `server/src/` | API, persistence, routing, runners, memory, and scheduling |
+| `web/src/` | React interface built with Vite |
+| `desktop/` | Electron desktop shell |
+| `fixtures/vault/` | Sample memory used for demos and tests |
+| `scripts/` | Launchers, login helpers, and packaging |
+| `docs/` | Installation, design, decisions, and screenshots |
+
+## Configuration
+
+The launcher creates `.env` from [.env.example](.env.example) if needed. For manual development, copy that file yourself. Keep credentials and real vault content out of Git.
+
+| Variable | Purpose |
+| --- | --- |
+| `JARVIS_RUNNER` | `mock` for scripted runs; `real` for authenticated agents |
+| `JARVIS_VAULT` | Markdown vault directory; start with the fixture path |
+| `JARVIS_BIND` / `JARVIS_PORT` | Server address; defaults to loopback on port 4317 |
+| `JARVIS_ACCESS_TOKEN` | Required when configuring non-loopback access |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_CHAT_ID` | Optional Telegram integration |
+| `JARVIS_PUBLIC_URL` | Base URL included in Telegram links |
+| `JARVIS_FEEDS_FETCH` | Set to `1` to enable feed fetching in mock mode |
+
+Runtime configuration, SQLite data, and run artifacts live under the ignored `data/` directory. Some tasks also write to configured project worktrees or the selected vault. Back up important data before using real agents.
+
+## Development
+
+```sh
+npm run dev
+```
+
+Development runs the API on port 4317 and the web UI at [http://127.0.0.1:5173](http://127.0.0.1:5173). Set `JARVIS_RUNNER=mock` in `.env` to develop without real agent calls.
+
+```sh
+npm test
 npm run typecheck
-npm run build && node web/scripts/screenshots.mjs   # UI quality gate
+npm run build
 ```
 
-## Keyboard
-`Ctrl/⌘ K` palette · `c` new task · `/` search · `g` then `h b a e n p o m s r u ,` to jump · `j`/`k` move · `[`/`]` move a board card · `Esc` close.
+The automated server tests configure the mock runner. Real-account smoke commands (`npm run smoke:claude` and `npm run smoke:codex`) are separate, make actual agent calls, and should only be run deliberately by an authenticated owner.
+
+For UI changes, follow [docs/DESIGN.md](docs/DESIGN.md) and the repository instructions. The screenshot helper is `node web/scripts/screenshots.mjs` after building and with the required local app/browser setup available.
+
+Desktop development uses `npm run desktop`. Installer commands are `npm run package:win`, `npm run package:mac`, and `npm run package:linux`; platform requirements are described in [docs/INSTALL.md](docs/INSTALL.md).
+
+## Permissions and limitations
+
+Jarvis is designed for one trusted local user. Keep the default loopback binding unless you have deliberately configured remote access and a token. It is not a hardened multi-user hosting service.
+
+Approval handling depends on the selected runner. Claude uses a per-tool permission callback; the Codex integration relies on its configured execution permissions and the Jarvis approval-tool instructions. The approval UI should not be treated as a universal security boundary. Review the implementation before granting agents access to sensitive projects or connectors.
+
+Usage readings depend on SDK and CLI behavior and may be unavailable or delayed. Agent integrations and optional voice components can need updates as their dependencies change. Real account access, desktop installers, and voice performance must be checked in the environment where you intend to use them.
+
+## Troubleshooting
+
+- **Node version error:** use Node.js 24 or newer; the server uses built-in SQLite and direct TypeScript execution.
+- **Demo still active:** remove the demo flag and set `JARVIS_RUNNER=real` in `.env`.
+- **Agent authentication fails:** run the corresponding `login:*` command and confirm account access in the official CLI.
+- **Port in use:** close the other instance or set `JARVIS_PORT` to an available port.
+- **Missing usage data:** confirm the CLI is producing supported session/usage information; do not infer remaining quota from absent data.
+
+## Contributing
+
+Read [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), and [SPEC.md](SPEC.md) before changing the code. Open a focused pull request with reproduction steps or a clear explanation of the improvement. Run tests with the mock runner and run type checking before submission. UI changes also need the documented visual checks.
+
+Use fixtures instead of real vaults, avoid account-dependent tests, and never include authentication stores, `.env`, runtime data, or private transcripts. Discuss major changes to the single-user architecture first.
+
+## License
+
+No license for the project code is included. An open-source license must be selected before a public open-source release. Vendored assets and skills retain their own notices and terms.
