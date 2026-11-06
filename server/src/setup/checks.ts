@@ -80,7 +80,7 @@ export async function runChecks(s: Services): Promise<Check[]> {
     detail: keys.length ? `${keys.join(', ')} found in the environment — Jarvis strips them from agents, but remove them from your profile to be safe.` : 'Agents always bill your Claude and ChatGPT plans.',
   });
 
-  const claudeLogin = existsSync(join(home, '.claude', '.credentials.json')) || process.platform === 'darwin';
+  const claudeLogin = !s.env.demo && (existsSync(join(home, '.claude', '.credentials.json')) || process.platform === 'darwin');
   const claudeVerified = getSetting<string | null>(s.db, 'setup.verified.claude', null);
   checks.push({
     id: 'claude', title: 'Claude Code login (Claude Pro/Max)', required: true,
@@ -107,7 +107,7 @@ export async function runChecks(s: Services): Promise<Check[]> {
   });
 
   const codexHome = process.env.CODEX_HOME || join(home, '.codex');
-  const codexLogin = existsSync(join(codexHome, 'auth.json'));
+  const codexLogin = !s.env.demo && existsSync(join(codexHome, 'auth.json'));
   const codexVerified = getSetting<string | null>(s.db, 'setup.verified.codex', null);
   checks.push({
     id: 'codex', title: 'Codex login (ChatGPT Plus/Pro)', required: true,

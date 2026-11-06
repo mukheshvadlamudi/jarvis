@@ -10,6 +10,11 @@
   "engines": {
     "node": ">=24"
   },
+  "overrides": {
+    "@huggingface/transformers": { "sharp": "^0.35.5" },
+    "app-builder-lib": { "minimatch": "^11.0.1" },
+    "@electron/universal": { "minimatch": "^11.0.1" }
+  },
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "start": "npm run build -w web && npm run start -w server",

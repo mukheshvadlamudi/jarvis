@@ -12,8 +12,13 @@ const log = logger('jarvis');
 
 async function main(): Promise<void> {
   // Choices made on the Setup page (data/local-env.json) win over .env defaults.
-  const base = loadEnv();
-  const env = loadEnv({ ...process.env, ...readLocalEnv(join(base.dataDir, 'local-env.json')) });
+  const demo = process.env.JARVIS_DEMO === '1';
+  const env = demo ? loadEnv({
+    JARVIS_DEMO: '1',
+    JARVIS_RUNNER: 'mock',
+    JARVIS_DATA_DIR: 'data/demo',
+    JARVIS_PORT: process.env.JARVIS_PORT || '4318',
+  }) : loadEnv({ ...process.env, ...readLocalEnv(join(loadEnv().dataDir, 'local-env.json')) });
   const keys = presentBillingKeys();
   if (keys.length) {
     log.warn(`${keys.join(', ')} set in this environment. Jarvis removes them from every agent it starts, so runs still use your Claude/ChatGPT plan logins.`);

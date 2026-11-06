@@ -15,6 +15,7 @@ export const RESTART_EXIT_CODE = 75;
 
 export function registerSetupRoutes(app: Hono, s: Services): void {
   const localFile = () => join(s.env.dataDir, 'local-env.json');
+  const demoMessage = 'The demo uses sample data. Run npm run app to connect your own files or accounts.';
 
   app.get('/api/setup', async (c) => {
     const checks = await runChecks(s);
@@ -30,7 +31,7 @@ export function registerSetupRoutes(app: Hono, s: Services): void {
       platform: process.platform,
       pendingRestart,
       launcher: process.env.JARVIS_LAUNCHER === '1',
-      suggestions: { vaults: suggestVaults(), codeRoots: suggestCodeRoots() },
+      suggestions: s.env.demo ? { vaults: [], codeRoots: [] } : { vaults: suggestVaults(), codeRoots: suggestCodeRoots() },
     });
   });
 
@@ -41,6 +42,7 @@ export function registerSetupRoutes(app: Hono, s: Services): void {
   });
 
   app.post('/api/setup/vault', async (c) => {
+    if (s.env.demo) return bad(c, demoMessage, 409);
     const b = await body<{ path?: string; save?: boolean }>(c);
     if (!b.path?.trim()) return bad(c, 'Paste the full path of your Obsidian vault folder.');
     const v = validateVault(b.path);
@@ -53,6 +55,7 @@ export function registerSetupRoutes(app: Hono, s: Services): void {
   });
 
   app.post('/api/setup/scan', async (c) => {
+    if (s.env.demo) return bad(c, demoMessage, 409);
     const b = await body<{ path?: string }>(c);
     if (!b.path?.trim()) return bad(c, 'Paste a folder that contains your git repositories.');
     const registered = new Set(all<{ path: string }>(s.db, "SELECT path FROM projects WHERE path IS NOT NULL").map((r) => r.path));
@@ -60,6 +63,7 @@ export function registerSetupRoutes(app: Hono, s: Services): void {
   });
 
   app.post('/api/setup/projects', async (c) => {
+    if (s.env.demo) return bad(c, demoMessage, 409);
     const b = await body<{ repos?: Array<{ name: string; path: string }> }>(c);
     const existing = new Set(all<{ path: string }>(s.db, 'SELECT path FROM projects WHERE path IS NOT NULL').map((r) => r.path));
     let added = 0;
@@ -73,6 +77,7 @@ export function registerSetupRoutes(app: Hono, s: Services): void {
   });
 
   app.post('/api/setup/telegram', async (c) => {
+    if (s.env.demo) return bad(c, demoMessage, 409);
     const b = await body<{ token?: string; chatId?: string }>(c);
     if (!b.token?.trim() || !/^\d+:[\w-]{20,}$/.test(b.token.trim())) return bad(c, 'That does not look like a bot token from @BotFather (digits:letters).');
     if (!b.chatId?.trim() || !/^-?\d+$/.test(b.chatId.trim())) return bad(c, 'The chat id is a number — message @userinfobot on Telegram to get yours.');

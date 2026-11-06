@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix } from 'node:path';
 import type { Db } from '../db/index.ts';
 import { all, get, getSetting, run, setSetting } from '../db/index.ts';
@@ -210,9 +210,13 @@ export class MemoryProposals {
       if (!existsSync(dest)) copyFileSync(abs, dest);
     }
     mkdirSync(dirname(abs), { recursive: true });
-    const tmp = `${abs}.jarvis-tmp`;
-    writeFileSync(tmp, next);
-    renameSync(tmp, abs);
+    const tmp = `${abs}.${newId('tmp')}`;
+    writeFileSync(tmp, next, { flag: 'wx' });
+    try {
+      renameSync(tmp, abs);
+    } finally {
+      rmSync(tmp, { force: true });
+    }
     this.vault.indexFile(p.target_path);
     run(this.db, "UPDATE memory_proposals SET status = 'applied', decided_at = ? WHERE id = ?", nowIso(), id);
     const r = this.get(id)!;

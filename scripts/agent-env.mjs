@@ -12,7 +12,7 @@ export const BILLING_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENA
 /** Environment without API keys, so logins and runs always use the plan accounts. */
 export function cleanEnv() {
   const env = { ...process.env };
-  for (const k of BILLING_KEYS) delete env[k];
+  for (const k of Object.keys(env)) if (BILLING_KEYS.includes(k.toUpperCase())) delete env[k];
   return env;
 }
 

@@ -34,6 +34,7 @@ export function registerCoreRoutes(app: Hono, s: Services): void {
     c.json({
       ok: true,
       runner: s.env.runner,
+      demo: s.env.demo,
       uptimeSec: Math.round((Date.now() - started) / 1000),
       memoryMb: Math.round(process.memoryUsage().rss / 1048576),
       activeRuns: s.orchestrator.activeCount(),
@@ -241,6 +242,7 @@ export function registerCoreRoutes(app: Hono, s: Services): void {
 
   app.post('/api/projects', async (c) => {
     const b = await body<Partial<Project>>(c);
+    if (s.env.demo && b.path) return bad(c, 'Run npm run app to connect a local repository.', 409);
     if (!b.name?.trim()) return bad(c, 'A project needs a name.');
     if (b.kind && !['code', 'client', 'area'].includes(b.kind)) return bad(c, 'kind must be code, client or area.');
     const p: Project = { id: newId('p'), name: b.name.trim(), kind: b.kind ?? 'code', path: b.path?.trim() || null, repo: b.repo?.trim() || null, vault_note: b.vault_note?.trim() || null, created_at: nowIso() };
@@ -254,6 +256,7 @@ export function registerCoreRoutes(app: Hono, s: Services): void {
     const cur = get<Project>(s.db, 'SELECT * FROM projects WHERE id = ?', id);
     if (!cur) return bad(c, 'No project with that id.', 404);
     const b = await body<Partial<Project>>(c);
+    if (s.env.demo && b.path && b.path !== cur.path) return bad(c, 'Run npm run app to connect a local repository.', 409);
     const next = { ...cur, ...Object.fromEntries(Object.entries(b).filter(([k]) => ['name', 'kind', 'path', 'repo', 'vault_note'].includes(k))) } as Project;
     run(s.db, 'UPDATE projects SET name = ?, kind = ?, path = ?, repo = ?, vault_note = ? WHERE id = ?', next.name, next.kind, next.path, next.repo, next.vault_note, id);
     s.bus.publish('project.updated', next);

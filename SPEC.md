@@ -16,7 +16,7 @@ Single user. Runs on a Windows 11 laptop with **8 GB RAM** (≈0.5–2 GB free i
 4. **Localhost by default.** Server binds `127.0.0.1`. Remote access (phone over Tailscale) only when `JARVIS_BIND` is changed **and** `JARVIS_ACCESS_TOKEN` is set; every request then needs the token.
 5. **Nothing outward-facing without approval.** Sending email/messages, posting, pushing to a remote, opening PRs, deleting files outside a task worktree, purchases → always paused for owner approval.
 6. **Secrets never in the repo or the vault.** `.env` is git-ignored. Credentials stay in the CLIs' own stores and connectors.
-7. **Voice runs on the device, never on paid APIs.** (Changed by the owner: voice output is now allowed.) Hands-free voice uses Kokoro-82M for speech, Whisper for recognition and Silero VAD for turn-taking, all in the browser/desktop app — no ElevenLabs/Sarvam/cloud TTS, no credits. The mic button in inputs (Web Speech API) and the phone keyboard's mic in Telegram still work for dictation.
+7. **Hands-free voice has an on-device mode.** Kokoro-82M speaks, Whisper transcribes, and Silero VAD detects speech in the browser or desktop app. Gemini Live requires a separate server-side key and sends audio to Google when selected. The mic button in inputs uses the browser's Web Speech API; the phone keyboard's mic can be used for Telegram dictation.
 
 ## 2. Stack
 
@@ -165,7 +165,7 @@ interface RunHandle { done: Promise<RunResult>; cancel(): Promise<void>;
 
 ## 9. Memory (vault) — Phase 2a
 
-Vault path from `JARVIS_VAULT` (owner's is `C:\Users\mukhe\Documents\AI-System`). Tests use `fixtures/vault`.
+Set the vault path with `JARVIS_VAULT`. Tests use `fixtures/vault`.
 
 Target structure (Jarvis reads it; a one-time **migration proposal** helps the owner move to it — never auto-moves files):
 ```

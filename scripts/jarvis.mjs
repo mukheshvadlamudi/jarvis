@@ -2,13 +2,14 @@
 // agent logins, starts Jarvis, opens it in the browser, and restarts it when Setup asks to.
 //   Windows: double-click start-jarvis.cmd   macOS: start-jarvis.command   Linux: ./start-jarvis.sh
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { ROOT, loggedIn } from './agent-env.mjs';
 
 const args = new Set(process.argv.slice(2));
+const demo = args.has('--demo');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const say = (m = '') => console.log(`  ${m}`);
 
@@ -63,23 +64,26 @@ if (major < 24) {
   say('Install the LTS from https://nodejs.org (Windows: winget install OpenJS.NodeJS.LTS) and run this again.');
   process.exit(1);
 }
-if (!existsSync(join(ROOT, 'node_modules'))) {
-  say('First run: installing dependencies (one time, a minute or two)…');
-  run(npm, ['install', '--no-fund', '--no-audit']);
+const lock = join(ROOT, 'package-lock.json');
+const installedLock = join(ROOT, 'node_modules', '.package-lock.json');
+if (!existsSync(installedLock) || statSync(installedLock).mtimeMs < statSync(lock).mtimeMs) {
+  say('Installing dependencies from the lockfile…');
+  run(npm, ['ci', '--no-fund', '--no-audit']);
 }
-if (!existsSync(join(ROOT, '.env'))) {
+if (!demo && !existsSync(join(ROOT, '.env'))) {
   copyFileSync(join(ROOT, '.env.example'), join(ROOT, '.env'));
-  const real = readFileSync(join(ROOT, '.env'), 'utf8').replace(/^JARVIS_RUNNER=.*$/m, `JARVIS_RUNNER=${args.has('--demo') ? 'mock' : 'real'}`);
-  writeFileSync(join(ROOT, '.env'), real);
   say('Created .env (edit it any time; the Setup page covers the common settings).');
 }
 const dist = join(ROOT, 'web', 'dist', 'index.html');
-if (!existsSync(dist) || statSync(dist).mtimeMs < newestMtime(join(ROOT, 'web', 'src'))) {
+const buildInputs = Math.max(newestMtime(join(ROOT, 'web', 'src')), ...[
+  lock, join(ROOT, 'web', 'vite.config.ts'), join(ROOT, 'web', 'index.html'),
+].map((file) => statSync(file).mtimeMs));
+if (!existsSync(dist) || statSync(dist).mtimeMs < buildInputs) {
   say('Building the interface…');
   run(npm, ['run', 'build', '-w', 'web']);
 }
 
-const mode = args.has('--demo') ? 'mock' : envValue('JARVIS_RUNNER') ?? 'real';
+const mode = demo ? 'mock' : envValue('JARVIS_RUNNER') ?? 'real';
 if (mode === 'real') {
   for (const agent of ['claude', 'codex']) {
     if (loggedIn(agent)) continue;
@@ -89,7 +93,11 @@ if (mode === 'real') {
   }
 }
 
-const port = envValue('JARVIS_PORT') ?? '4317';
+const port = Number(demo ? process.env.JARVIS_DEMO_PORT || '4318' : envValue('JARVIS_PORT') ?? '4317');
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  say(`Set ${demo ? 'JARVIS_DEMO_PORT' : 'JARVIS_PORT'} to a port from 1 to 65535.`);
+  process.exit(1);
+}
 const url = `http://127.0.0.1:${port}`;
 let opened = false;
 
@@ -97,7 +105,7 @@ let opened = false;
 const running = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1500) })
   .then((r) => (r.ok ? r.json() : null))
   .catch(() => null);
-if (running?.ok) {
+if (running?.ok && (demo ? running.demo === true : !running.demo && running.runner === mode)) {
   say(`Jarvis is already running at ${url} (${running.runner} mode). Opening it.`);
   openBrowser(url);
   process.exit(0);
@@ -113,7 +121,7 @@ if (busy) {
 }
 
 function start() {
-  const env = { ...process.env, JARVIS_LAUNCHER: '1', ...(args.has('--demo') ? { JARVIS_RUNNER: 'mock' } : {}) };
+  const env = { ...process.env, JARVIS_LAUNCHER: '1', ...(demo ? { JARVIS_DEMO: '1', JARVIS_PORT: String(port), JARVIS_FEEDS_FETCH: '0' } : {}) };
   const child = spawn(process.execPath, ['--env-file-if-exists=.env', join('server', 'src', 'index.ts')], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'inherit'] });
   child.stdout.on('data', (d) => {
     process.stdout.write(d);

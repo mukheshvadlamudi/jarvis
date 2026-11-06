@@ -2,8 +2,11 @@
 
 Jarvis is a **local app**: a small server on your computer plus its interface. There is no cloud service and no shared account — each person runs their own copy with their own Claude and ChatGPT plans. Two ways to run it:
 
-## Option A — Desktop app (recommended)
-1. Download the installer for your system from the project's **Releases** page (or from a manually started **Actions → Desktop app → Run workflow** run, under *Artifacts*, kept for 3 days):
+## Option A — Desktop app (build from source)
+
+There is no published installer release yet. Use the build commands below, or use Option B for the quickest start.
+
+1. Build the installer for your system (maintainers can also run the **Desktop app** workflow and use its temporary artifacts):
    - Windows: `Jarvis-Setup-x.y.z.exe` (or `Jarvis-Portable-x.y.z.exe`, no install)
    - macOS: `Jarvis-x.y.z-arm64.dmg` (unsigned: first open with right-click → Open)
    - Linux: `Jarvis-x.y.z-x86_64.AppImage` or `.deb`
@@ -23,7 +26,7 @@ Tap the shortcut from another app to talk. The small overlay appears near the bo
 
 Windows uses PowerShell and Windows Forms `SendKeys` for paste. macOS uses System Events and may require Accessibility/Automation permission for Jarvis. Linux requires `xdotool` and an X11 session; Wayland compositors can prevent focus and paste automation. The browser/PWA has no global shortcut or paste automation. Native focus, shortcut release delivery and microphone permissions should be checked on each target OS.
 
-Integration needed from the shared voice owner: subscribe to the desktop preload's `onAnywhereActive(active)` event and suspend the main window's hands-free microphone while `active` is true, then restore its previous state. Until that is connected, leave the main window's hands-free Voice off while using the overlay to avoid duplicate recognition. No shared `/overlay` route is needed: Electron serves the bundled `desktop/overlay.html` entry on the local server origin in an isolated session.
+The main window pauses hands-free listening while the overlay is active so both do not transcribe at once.
 
 ### Let Claude use your Chrome (optional)
 
@@ -59,7 +62,7 @@ Optional: a microphone for hands-free voice. The voice models download once (~17
 4. Jarvis opens at http://127.0.0.1:4317 on the **Setup** page: verify both logins (one tiny run each), choose the vault folder, find and connect your code folders, optionally sync skills, turn on routines and connect Telegram. "Restart now" applies saved settings.
 5. Install it as an app: Chrome/Edge → install icon in the address bar (or Setup → **Install Jarvis**). It then has its own window, icon and Start-menu entry.
 
-From then on: double-click the launcher (or the installed app once Jarvis is running). To try it without touching any plan: `start-jarvis.cmd --demo` (or `npm run demo`).
+From then on: double-click the launcher (or the installed app once Jarvis is running). To try it without touching any plan, run `npm run demo`. The demo runs on port 4318 with separate state under `data/demo/`.
 
 ## Updating
 Download the new version over the old folder (keep `data/` and `.env`), then start it again — the launcher rebuilds when needed. With git: `git pull` then start.

@@ -39,8 +39,8 @@ describe('task outputs', () => {
     const cwd = ctx.s.orchestrator.runsForTask(id)[0].cwd;
     const outside = mkdtempSync(join(tmpdir(), 'jarvis-secret-'));
     writeFileSync(join(outside, 'secret.txt'), 'nope');
-    symlinkSync(join(outside, 'secret.txt'), join(cwd, 'link.txt'));
-    expect((await ctx.app.request(`/api/tasks/${id}/outputs/raw?folder=0&path=link.txt`)).status).toBe(400);
+    symlinkSync(outside, join(cwd, 'linked'), 'junction');
+    expect((await ctx.app.request(`/api/tasks/${id}/outputs/raw?folder=0&path=linked/secret.txt`)).status).toBe(400);
     expect((await ctx.app.request(`/api/tasks/${id}/outputs/raw?folder=3&path=draft.md`)).status).toBe(404);
   });
 

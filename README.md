@@ -16,7 +16,7 @@ Capture tasks, follow agent runs, and keep projects and memory in one place.
 
 Jarvis brings a task board, streamed conversations, approval workflows, schedules, and optional Telegram access into a single-user application. The official Claude Agent SDK and Codex SDK handle agent execution; Jarvis coordinates the work around them.
 
-**Project status:** active personal project. Start with the mock demo and sample vault before connecting your own files or agent accounts.
+**Project status:** public source, pre-release. Start with the mock demo and sample vault before connecting your own files or agent accounts. There is no published installer release yet.
 
 ## Try the demo
 
@@ -25,11 +25,11 @@ You need Node.js 24+ and Git. No agent login or model API key is required for th
 ```sh
 git clone https://github.com/mukheshvadlamudi/jarvis.git
 cd jarvis
-npm install
+npm ci
 npm run demo
 ```
 
-The launcher builds the web interface, creates local configuration on first run, and starts Jarvis at [http://127.0.0.1:4317](http://127.0.0.1:4317). Demo mode uses scripted agent runs and a working copy of the sample vault.
+The launcher builds the interface and starts the demo at [http://127.0.0.1:4318](http://127.0.0.1:4318). It uses scripted agent runs, a working copy of the sample vault, and a separate database in `data/demo/`. It does not use your configured vault, Telegram bot, or agent logins. Set `JARVIS_DEMO_PORT` if port 4318 is occupied.
 
 The launcher also supports `npm run app`, or the platform scripts `start-jarvis.cmd`, `start-jarvis.command`, and `start-jarvis.sh`. See the [installation guide](docs/INSTALL.md) for desktop packaging and setup details.
 
@@ -43,7 +43,7 @@ npm run login:codex
 npm run app
 ```
 
-If you first ran the demo, change `JARVIS_RUNNER=mock` to `JARVIS_RUNNER=real` in `.env` before launching the real app. The demo flag overrides this setting only for that demo launch.
+The real app defaults to [http://127.0.0.1:4317](http://127.0.0.1:4317). If an older demo left `JARVIS_RUNNER=mock` in your `.env`, change it to `real` before launching.
 
 Use Setup to select your vault and project folders. Begin with a disposable project to understand the agent permissions, worktrees, and approval behavior before assigning work on important files.
 
@@ -57,9 +57,10 @@ Use Setup to select your vault and project folders. Begin with a disposable proj
 | Projects | Register local repositories and inspect task worktrees and changes |
 | Memory and skills | Search a Markdown vault, review proposed edits, and sync selected skills |
 | Schedules and updates | Run routines and collect RSS, release, and page-change updates |
+| Workflows | Chain agent steps and owner decisions into repeatable routines |
 | Usage | Inspect available usage readings and run token totals |
 | People | Track follow-ups from vault notes |
-| Voice | Optional local speech components and hands-free interaction |
+| Voice | Local speech recognition and synthesis, plus an optional Gemini Live mode |
 | Telegram | Optional task capture and approval notifications |
 
 ## Architecture
@@ -93,6 +94,7 @@ The launcher creates `.env` from [.env.example](.env.example) if needed. For man
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_CHAT_ID` | Optional Telegram integration |
 | `JARVIS_PUBLIC_URL` | Base URL included in Telegram links |
 | `JARVIS_FEEDS_FETCH` | Set to `1` to enable feed fetching in mock mode |
+| `GEMINI_API_KEY` | Optional server-side credential for Gemini Live; this mode sends audio to Google |
 
 Runtime configuration, SQLite data, and run artifacts live under the ignored `data/` directory. Some tasks also write to configured project worktrees or the selected vault. Back up important data before using real agents.
 
@@ -110,7 +112,7 @@ npm run typecheck
 npm run build
 ```
 
-The automated server tests configure the mock runner. Real-account smoke commands (`npm run smoke:claude` and `npm run smoke:codex`) are separate, make actual agent calls, and should only be run deliberately by an authenticated owner.
+CI runs the build, type checks, and mock tests on Windows and Linux. Real-account smoke commands (`npm run smoke:claude` and `npm run smoke:codex`) are separate, make actual agent calls, and should only be run deliberately by an authenticated owner.
 
 For UI changes, follow [docs/DESIGN.md](docs/DESIGN.md) and the repository instructions. The screenshot helper is `node web/scripts/screenshots.mjs` after building and with the required local app/browser setup available.
 
@@ -118,7 +120,7 @@ Desktop development uses `npm run desktop`. Installer commands are `npm run pack
 
 ## Permissions and limitations
 
-Jarvis is designed for one trusted local user. Keep the default loopback binding unless you have deliberately configured remote access and a token. It is not a hardened multi-user hosting service.
+Jarvis is designed for one trusted local user. Keep the default loopback binding; other programs running on the machine can reach the API when no token is set. For remote access, use a private network, HTTPS, and a unique random token. Do not expose Jarvis directly to the public internet. See [SECURITY.md](SECURITY.md) for the trust model and reporting instructions.
 
 Approval handling depends on the selected runner. Claude uses a per-tool permission callback; the Codex integration relies on its configured execution permissions and the Jarvis approval-tool instructions. The approval UI should not be treated as a universal security boundary. Review the implementation before granting agents access to sensitive projects or connectors.
 
@@ -140,4 +142,4 @@ Use fixtures instead of real vaults, avoid account-dependent tests, and never in
 
 ## License
 
-No license for the project code is included. An open-source license must be selected before a public open-source release. Vendored assets and skills retain their own notices and terms.
+The project code is publicly visible and currently unlicensed. The repository does not grant permission to redistribute it. Vendored assets and skills retain their own notices and terms.

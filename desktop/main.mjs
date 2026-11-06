@@ -16,6 +16,11 @@ const fileEnv = readEnvFile(paths.envFile);
 const PORT = process.env.JARVIS_PORT || fileEnv.JARVIS_PORT || '4317';
 const TOKEN = process.env.JARVIS_ACCESS_TOKEN || fileEnv.JARVIS_ACCESS_TOKEN || '';
 const ORIGIN = `http://127.0.0.1:${PORT}`;
+const isLocal = (url) => URL.parse(String(url))?.origin === ORIGIN;
+const openWebLink = (url) => {
+  const parsed = URL.parse(url);
+  if (parsed && ['https:', 'http:'].includes(parsed.protocol)) void shell.openExternal(parsed.href).catch(() => {});
+};
 const RESTART = 75;
 
 let win = null;
@@ -141,23 +146,26 @@ function createWindow() {
   });
   // The local Jarvis page may use the microphone (hands-free voice); nothing else gets permissions.
   win.webContents.session.setPermissionRequestHandler((wc, permission, done, details) => {
-    done(permission === 'media' && (details.requestingUrl ?? wc.getURL()).startsWith(ORIGIN));
+    done(wc === win?.webContents && permission === 'media' && !details.mediaTypes?.includes('video') &&
+      isLocal(details.requestingUrl ?? wc.getURL()));
   });
-  win.webContents.session.setPermissionCheckHandler((_wc, permission, origin) => permission === 'media' && String(origin).startsWith(ORIGIN));
+  win.webContents.session.setPermissionCheckHandler((wc, permission, origin, details) =>
+    wc === win?.webContents && permission === 'media' && details.mediaType !== 'video' && isLocal(origin));
   win.loadFile(join(here, 'splash.html'));
   win.once('ready-to-show', () => win.show());
 
   // Links to other sites open in the default browser; the app never navigates away from Jarvis.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith(ORIGIN)) void shell.openExternal(url);
+    if (!isLocal(url)) openWebLink(url);
     return { action: 'deny' };
   });
-  win.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith(ORIGIN) && !url.startsWith('file:')) {
+  win.webContents.on('will-navigate', (e) => {
+    if (!isLocal(e.url)) {
       e.preventDefault();
-      void shell.openExternal(url);
+      openWebLink(e.url);
     }
   });
+  win.webContents.on('will-redirect', (e) => { if (!isLocal(e.url)) e.preventDefault(); });
   win.on('close', (e) => {
     if (quitting) return;
     e.preventDefault();
@@ -280,9 +288,17 @@ function openLogin(agent) {
   return { ok: true, message: agent === 'claude' ? 'A terminal opened: type /login, choose your Claude subscription, finish in the browser, then /exit.' : 'A terminal opened: choose “Sign in with ChatGPT” in the browser.' };
 }
 
-ipcMain.handle('jarvis:login', (_e, agent) => (agent === 'claude' || agent === 'codex' ? openLogin(agent) : { ok: false, message: 'unknown agent' }));
-ipcMain.handle('jarvis:open-path', (_e, which) => shell.openPath(which === 'logs' ? dirname(paths.logFile) : paths.dataDir));
-ipcMain.handle('jarvis:info', () => ({ version: app.getVersion(), packaged: app.isPackaged, dataDir: paths.dataDir, attached }));
+function localIpc(handler) {
+  return (e, ...args) => {
+    if (e.sender !== win?.webContents || !e.senderFrame || e.senderFrame.parent || !isLocal(e.senderFrame.url)) {
+      throw new Error('Jarvis desktop commands are only available from the main window');
+    }
+    return handler(...args);
+  };
+}
+ipcMain.handle('jarvis:login', localIpc((agent) => (agent === 'claude' || agent === 'codex' ? openLogin(agent) : { ok: false, message: 'unknown agent' })));
+ipcMain.handle('jarvis:open-path', localIpc((which) => shell.openPath(which === 'logs' ? dirname(paths.logFile) : paths.dataDir)));
+ipcMain.handle('jarvis:info', localIpc(() => ({ version: app.getVersion(), packaged: app.isPackaged, dataDir: paths.dataDir, attached })));
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }]) : null);
