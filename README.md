@@ -1,12 +1,22 @@
+<div align="center">
+
 # Jarvis
 
-A local command centre for work carried out by Claude Code and Codex. Capture a task, route it to an agent, follow its progress, and keep results connected to projects and a Markdown memory vault.
+**A local workspace for work with Claude Code and Codex.**
 
-Jarvis combines a task board, streamed conversations, approval workflows, schedules, and optional Telegram access in a single-user application. It uses the official agent SDKs rather than implementing its own coding harness.
+Capture tasks, follow agent runs, and keep projects and memory in one place.
 
-**Status:** active personal project. Start with the mock demo and a sample vault before connecting your own files or agent accounts. No project license has been selected yet.
+[Try the demo](#try-the-demo) · [Architecture](#architecture) · [Configuration](#configuration) · [Contributing](#contributing)
 
-![Jarvis conversation interface](docs/screenshots/ask-1440-dark.png)
+</div>
+
+![Jarvis mock-demo conversation with an agent review and a second opinion](docs/screenshots/ask-conversation-1440-dark.png)
+
+*Repository demo screenshot. Conversations shown use fixture data.*
+
+Jarvis brings a task board, streamed conversations, approval workflows, schedules, and optional Telegram access into a single-user application. The official Claude Agent SDK and Codex SDK handle agent execution; Jarvis coordinates the work around them.
+
+**Project status:** active personal project. Start with the mock demo and sample vault before connecting your own files or agent accounts.
 
 ## Try the demo
 
@@ -54,19 +64,12 @@ Use Setup to select your vault and project folders. Begin with a disposable proj
 
 ## Architecture
 
-```text
-React web UI / Electron shell / Telegram
-                    ↓
-          Hono API + task scheduler
-                    ↓
-        routing / approvals / memory
-              ↙                ↘
-     Claude Agent SDK       Codex SDK
-              ↘                ↙
-        local projects + Markdown vault
-                    ↓
-         SQLite + streamed run events
-```
+![Jarvis logical architecture showing the interface, local Hono service, agent runtimes, local storage, projects, and owner decisions](docs/assets/architecture.svg)
+
+[Editable Draw.io diagram](docs/assets/architecture.drawio) · [PNG version](docs/assets/architecture.png)
+
+The diagram shows the core local coordination path. The interface talks to Hono; the service persists task and run state and dispatches work through the official agent runtimes. Real agent tasks call external provider services. Optional Telegram and voice integrations are outside this simplified view.
+
 
 | Path | Purpose |
 | --- | --- |
