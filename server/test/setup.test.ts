@@ -35,6 +35,15 @@ describe('setup', () => {
     expect((await ctx.req('GET', '/api/setup')).json.pendingRestart).toBe(true);
   });
 
+  it('keeps demo setup on sample data even when given local paths', async () => {
+    ctx = makeCtx({ env: { JARVIS_DEMO: '1' } });
+    expect((await ctx.req('GET', '/api/setup')).json.suggestions).toEqual({ vaults: [], codeRoots: [] });
+    expect((await ctx.req('POST', '/api/setup/vault', { path: FIXTURE_VAULT, save: true })).status).toBe(409);
+    expect((await ctx.req('POST', '/api/setup/projects', { repos: [{ path: FIXTURE_VAULT }] })).status).toBe(409);
+    expect((await ctx.req('POST', '/api/projects', { name: 'External repo', path: FIXTURE_VAULT })).status).toBe(409);
+    expect((await ctx.req('POST', '/api/projects/demo/worktrees/t_demo/pr')).status).toBe(400);
+  });
+
   it('finds git repos under a folder and connects them as projects', async () => {
     ctx = makeCtx();
     const root = mkdtempSync(join(tmpdir(), 'jarvis-code-'));

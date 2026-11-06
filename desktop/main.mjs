@@ -146,9 +146,11 @@ function createWindow() {
   });
   // The local Jarvis page may use the microphone (hands-free voice); nothing else gets permissions.
   win.webContents.session.setPermissionRequestHandler((wc, permission, done, details) => {
-    done(wc === win?.webContents && permission === 'media' && isLocal(details.requestingUrl ?? wc.getURL()));
+    done(wc === win?.webContents && permission === 'media' && !details.mediaTypes?.includes('video') &&
+      isLocal(details.requestingUrl ?? wc.getURL()));
   });
-  win.webContents.session.setPermissionCheckHandler((wc, permission, origin) => wc === win?.webContents && permission === 'media' && isLocal(origin));
+  win.webContents.session.setPermissionCheckHandler((wc, permission, origin, details) =>
+    wc === win?.webContents && permission === 'media' && details.mediaType !== 'video' && isLocal(origin));
   win.loadFile(join(here, 'splash.html'));
   win.once('ready-to-show', () => win.show());
 
@@ -157,13 +159,13 @@ function createWindow() {
     if (!isLocal(url)) openWebLink(url);
     return { action: 'deny' };
   });
-  win.webContents.on('will-navigate', (e, url) => {
-    if (!isLocal(url)) {
+  win.webContents.on('will-navigate', (e) => {
+    if (!isLocal(e.url)) {
       e.preventDefault();
-      openWebLink(url);
+      openWebLink(e.url);
     }
   });
-  win.webContents.on('will-redirect', (e, url) => { if (!isLocal(url)) e.preventDefault(); });
+  win.webContents.on('will-redirect', (e) => { if (!isLocal(e.url)) e.preventDefault(); });
   win.on('close', (e) => {
     if (quitting) return;
     e.preventDefault();

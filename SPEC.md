@@ -16,7 +16,7 @@ Single user. Runs on a Windows 11 laptop with **8 GB RAM** (≈0.5–2 GB free i
 4. **Localhost by default.** Server binds `127.0.0.1`. Remote access (phone over Tailscale) only when `JARVIS_BIND` is changed **and** `JARVIS_ACCESS_TOKEN` is set; every request then needs the token.
 5. **Nothing outward-facing without approval.** Sending email/messages, posting, pushing to a remote, opening PRs, deleting files outside a task worktree, purchases → always paused for owner approval.
 6. **Secrets never in the repo or the vault.** `.env` is git-ignored. Credentials stay in the CLIs' own stores and connectors.
-7. **Hands-free voice defaults to on-device processing.** Kokoro-82M speaks, Whisper transcribes, and Silero VAD detects speech in the browser or desktop app. The optional Gemini Live voice mode requires a separate server-side key and sends audio to Google. The mic button in inputs uses the browser's Web Speech API; the phone keyboard's mic can be used for Telegram dictation.
+7. **Hands-free voice has an on-device mode.** Kokoro-82M speaks, Whisper transcribes, and Silero VAD detects speech in the browser or desktop app. Gemini Live requires a separate server-side key and sends audio to Google when selected. The mic button in inputs uses the browser's Web Speech API; the phone keyboard's mic can be used for Telegram dictation.
 
 ## 2. Stack
 

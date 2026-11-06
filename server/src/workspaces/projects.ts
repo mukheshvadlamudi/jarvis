@@ -131,6 +131,7 @@ export class Projects {
 
   /** Ask the owner before pushing and opening a PR; the work happens in `handleOpenPr` on approval. */
   async requestPr(projectId: string, taskId: string): Promise<Approval> {
+    if (this.s.env.demo) throw new Error('The demo does not publish pull requests.');
     const { project, wt } = this.worktree(projectId, taskId);
     const branch = await this.git(wt, ['rev-parse', '--abbrev-ref', 'HEAD']);
     if (!branch) throw new Error('Could not read the worktree branch.');
@@ -147,7 +148,7 @@ export class Projects {
   }
 
   async handleOpenPr(a: Approval, decision: 'approved' | 'rejected'): Promise<void> {
-    if (decision !== 'approved') return;
+    if (decision !== 'approved' || this.s.env.demo) return;
     const d = JSON.parse(a.detail_json) as { projectId: string; taskId: string; branch: string };
     try {
       const { wt } = this.worktree(d.projectId, d.taskId);
